@@ -9,25 +9,40 @@ App de gestão financeira inteligente, com aparência fintech premium (dark them
 - IA: Claude Sonnet 4.5 (anthropic) via `emergentintegrations` usando EMERGENT_LLM_KEY
 - Auth: JWT custom (bcrypt + PyJWT), token em AsyncStorage `nocker_token`
 
-## Telas (MVP)
-1. **Splash / Index** — verifica token, redireciona.
-2. **Login / Register** — JWT custom.
-3. **Dashboard** — saldo, entradas/saídas do mês, atalhos rápidos, evolução 6 meses (linha), gastos por categoria (donut), card IA de insight, últimas transações.
-4. **Transações** — CRUD, filtros (Todos/Entradas/Saídas), busca, categorias.
-5. **Cartões** — cartão estilo carteira digital com gradiente, barra de limite, cor configurável, fechamento/vencimento.
-6. **Metas** — progresso animado, gamificação (toque para adicionar valor).
-7. **Chat Nocker IA** — bolhas modernas, indicador de digitação, sugestões rápidas, multi-turn com contexto financeiro real do usuário.
-8. **Configurações** — perfil, segurança/notificações/exportação (placeholders), logout.
+## Telas (Fase A — Atual)
+1. Splash / Index — verifica token, redireciona.
+2. Login / Register — JWT custom.
+3. Dashboard — saldo, entradas/saídas do mês, atalhos rápidos, evolução 6 meses, donut por categoria, insight IA, últimas transações.
+4. Transações — CRUD, filtros (Todos/Entradas/Saídas), busca, categorias.
+5. Cartões — estilo carteira digital com gradiente, barra de limite.
+6. Chat Nocker IA — bolhas modernas, sugestões, multi-turn com contexto financeiro (Claude Sonnet 4.5).
+7. **Mais** (5ª aba — menu grid):
+   - Metas — gamificação
+   - Gastos Fixos — contas recorrentes ativar/pausar
+   - Parcelados — compras parceladas (monthly_amount, remaining_amount)
+   - Assinaturas — mensal/anual (monthly_cost)
+   - Projeção Financeira — hero + gráfico 3/6/12 meses + compromissos
+   - Categorias — 10 defaults auto-seed + custom
+   - Configurações
 
-## API (resumo)
-- `POST /api/auth/register|login`, `GET /api/auth/me`
-- `GET/POST/DELETE /api/transactions`
-- `GET/POST/DELETE /api/cards`
-- `GET/POST/PATCH/DELETE /api/goals`
-- `GET /api/dashboard/summary`
-- `POST /api/chat`, `GET /api/chat/history/{session_id}`, `GET /api/chat/sessions`
+## API
+- Auth: `POST /api/auth/register|login`, `GET /api/auth/me`
+- Transactions/Cards/Goals: `GET/POST/[PATCH]/DELETE`
+- Fixed expenses: `/api/fixed-expenses` CRUD + PATCH active
+- Installments: `/api/installments` CRUD (computed monthly + remaining)
+- Subscriptions: `/api/subscriptions` CRUD (computed monthly_cost)
+- Categories: `/api/categories` GET (auto-seed 10), POST, DELETE
+- Dashboard: `GET /api/dashboard/summary`
+- Projection: `GET /api/projection?months=N`
+- Chat: `POST /api/chat`, history endpoints
 
 ## Decisões
-- Sem dados de seed (decisão do usuário).
+- Sem dados de seed para o usuário.
 - Integração bancária real (Open Finance) → "Em breve".
-- Tema dark fixo por enquanto.
+- Gastos fixos = lista de referência (sem auto-gerar transações).
+- Tema dark fixo.
+- Bottom tabs: Início | Movimentos | Nocker IA (raised center) | Cartões | Mais.
+
+## Testes
+- Backend: 28/28 pytest (14 MVP + 14 Fase A) — 100%.
+- Frontend: ~92% e2e via Playwright (telas carregam, CRUDs funcionam, navegação ok).

@@ -6,9 +6,13 @@ import { theme } from '../theme';
 
 export function SubHeader({ title, subtitle, onAdd, addTestID }: { title: string; subtitle?: string; onAdd?: () => void; addTestID?: string }) {
   const router = useRouter();
+  const goBack = () => {
+    if (router.canGoBack()) router.back();
+    else router.replace('/(tabs)/more');
+  };
   return (
     <View style={s.row}>
-      <TouchableOpacity testID="sub-back" style={s.backBtn} onPress={() => router.back()}>
+      <TouchableOpacity testID="sub-back" style={s.backBtn} onPress={goBack}>
         <Ionicons name="chevron-back" size={22} color="#fff" />
       </TouchableOpacity>
       <View style={{ flex: 1 }}>
