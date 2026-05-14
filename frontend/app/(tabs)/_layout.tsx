@@ -67,13 +67,19 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
-        name="goals"
+        name="more"
         options={{
-          title: 'Metas',
-          tabBarIcon: ({ color, size }) => <Ionicons name="trophy" size={size} color={color} />,
+          title: 'Mais',
+          tabBarIcon: ({ color, size }) => <Ionicons name="grid" size={size} color={color} />,
         }}
       />
+      <Tabs.Screen name="goals" options={{ href: null }} />
       <Tabs.Screen name="settings" options={{ href: null }} />
+      <Tabs.Screen name="fixed-expenses" options={{ href: null }} />
+      <Tabs.Screen name="installments" options={{ href: null }} />
+      <Tabs.Screen name="subscriptions" options={{ href: null }} />
+      <Tabs.Screen name="projection" options={{ href: null }} />
+      <Tabs.Screen name="categories" options={{ href: null }} />
     </Tabs>
   );
 }

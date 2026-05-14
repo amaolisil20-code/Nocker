@@ -126,6 +126,89 @@ class ChatResponse(BaseModel):
     session_id: str
     reply: str
 
+class FixedExpenseCreate(BaseModel):
+    name: str
+    amount: float
+    category: str
+    due_day: int
+    color: Optional[str] = "#16A34A"
+    notes: Optional[str] = None
+    active: bool = True
+
+class FixedExpenseOut(BaseModel):
+    id: str
+    user_id: str
+    name: str
+    amount: float
+    category: str
+    due_day: int
+    color: str
+    notes: Optional[str] = None
+    active: bool
+    created_at: datetime
+
+class InstallmentCreate(BaseModel):
+    name: str
+    total_amount: float
+    installments_total: int
+    installments_paid: int = 0
+    start_date: Optional[datetime] = None
+    category: str
+    color: Optional[str] = "#3B82F6"
+    card_id: Optional[str] = None
+
+class InstallmentOut(BaseModel):
+    id: str
+    user_id: str
+    name: str
+    total_amount: float
+    installments_total: int
+    installments_paid: int
+    monthly_amount: float
+    remaining_amount: float
+    start_date: Optional[datetime] = None
+    category: str
+    color: str
+    card_id: Optional[str] = None
+    created_at: datetime
+
+class SubscriptionCreate(BaseModel):
+    name: str
+    amount: float
+    billing_cycle: Literal['monthly', 'yearly'] = 'monthly'
+    next_billing_date: Optional[datetime] = None
+    color: Optional[str] = "#8B5CF6"
+    icon: Optional[str] = "repeat"
+    active: bool = True
+
+class SubscriptionOut(BaseModel):
+    id: str
+    user_id: str
+    name: str
+    amount: float
+    billing_cycle: str
+    next_billing_date: Optional[datetime] = None
+    color: str
+    icon: str
+    active: bool
+    monthly_cost: float
+    created_at: datetime
+
+class CategoryCreate(BaseModel):
+    name: str
+    type: Literal['income', 'expense'] = 'expense'
+    color: Optional[str] = "#16A34A"
+    icon: Optional[str] = "pricetag"
+
+class CategoryOut(BaseModel):
+    id: str
+    user_id: str
+    name: str
+    type: str
+    color: str
+    icon: str
+    created_at: datetime
+
 # ---------- HELPERS ----------
 def hash_password(pw: str) -> str:
     return bcrypt.hashpw(pw.encode(), bcrypt.gensalt()).decode()
@@ -390,6 +473,286 @@ async def dashboard_summary(current=Depends(get_current_user)):
         "recent": recent,
         "cards_count": cards_count,
         "goals_count": goals_count,
+    }
+
+# ---------- FIXED EXPENSES ----------
+@api_router.post("/fixed-expenses", response_model=FixedExpenseOut)
+async def create_fixed_expense(payload: FixedExpenseCreate, current=Depends(get_current_user)):
+    doc = {
+        "id": str(uuid.uuid4()),
+        "user_id": current['id'],
+        "name": payload.name.strip(),
+        "amount": float(payload.amount),
+        "category": payload.category,
+        "due_day": int(payload.due_day),
+        "color": payload.color or "#16A34A",
+        "notes": payload.notes,
+        "active": payload.active,
+        "created_at": datetime.now(timezone.utc),
+    }
+    await db.fixed_expenses.insert_one(doc.copy())
+    return FixedExpenseOut(**doc)
+
+@api_router.get("/fixed-expenses", response_model=List[FixedExpenseOut])
+async def list_fixed_expenses(current=Depends(get_current_user)):
+    items = await db.fixed_expenses.find({"user_id": current['id']}, {"_id": 0}).sort("due_day", 1).to_list(200)
+    return [FixedExpenseOut(**i) for i in items]
+
+@api_router.patch("/fixed-expenses/{fe_id}", response_model=FixedExpenseOut)
+async def update_fixed_expense(fe_id: str, payload: dict, current=Depends(get_current_user)):
+    allowed = {"name", "amount", "category", "due_day", "color", "notes", "active"}
+    update = {k: v for k, v in payload.items() if k in allowed and v is not None}
+    if not update:
+        raise HTTPException(status_code=400, detail="Nada para atualizar")
+    res = await db.fixed_expenses.find_one_and_update(
+        {"id": fe_id, "user_id": current['id']}, {"$set": update},
+        return_document=True, projection={"_id": 0},
+    )
+    if not res:
+        raise HTTPException(status_code=404, detail="Gasto fixo não encontrado")
+    return FixedExpenseOut(**res)
+
+@api_router.delete("/fixed-expenses/{fe_id}")
+async def delete_fixed_expense(fe_id: str, current=Depends(get_current_user)):
+    res = await db.fixed_expenses.delete_one({"id": fe_id, "user_id": current['id']})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Gasto fixo não encontrado")
+    return {"ok": True}
+
+# ---------- INSTALLMENTS ----------
+def _installment_compute(doc: dict) -> dict:
+    monthly = float(doc['total_amount']) / max(doc['installments_total'], 1)
+    remaining_count = max(0, doc['installments_total'] - doc['installments_paid'])
+    return {
+        **doc,
+        "monthly_amount": round(monthly, 2),
+        "remaining_amount": round(monthly * remaining_count, 2),
+    }
+
+@api_router.post("/installments", response_model=InstallmentOut)
+async def create_installment(payload: InstallmentCreate, current=Depends(get_current_user)):
+    if payload.installments_total <= 0:
+        raise HTTPException(status_code=400, detail="Parcelas inválidas")
+    doc = {
+        "id": str(uuid.uuid4()),
+        "user_id": current['id'],
+        "name": payload.name.strip(),
+        "total_amount": float(payload.total_amount),
+        "installments_total": int(payload.installments_total),
+        "installments_paid": int(payload.installments_paid),
+        "start_date": payload.start_date or datetime.now(timezone.utc),
+        "category": payload.category,
+        "color": payload.color or "#3B82F6",
+        "card_id": payload.card_id,
+        "created_at": datetime.now(timezone.utc),
+    }
+    await db.installments.insert_one(doc.copy())
+    return InstallmentOut(**_installment_compute(doc))
+
+@api_router.get("/installments", response_model=List[InstallmentOut])
+async def list_installments(current=Depends(get_current_user)):
+    items = await db.installments.find({"user_id": current['id']}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    return [InstallmentOut(**_installment_compute(i)) for i in items]
+
+@api_router.patch("/installments/{i_id}", response_model=InstallmentOut)
+async def update_installment(i_id: str, payload: dict, current=Depends(get_current_user)):
+    allowed = {"name", "total_amount", "installments_total", "installments_paid", "category", "color", "card_id"}
+    update = {k: v for k, v in payload.items() if k in allowed and v is not None}
+    if not update:
+        raise HTTPException(status_code=400, detail="Nada para atualizar")
+    res = await db.installments.find_one_and_update(
+        {"id": i_id, "user_id": current['id']}, {"$set": update},
+        return_document=True, projection={"_id": 0},
+    )
+    if not res:
+        raise HTTPException(status_code=404, detail="Parcelamento não encontrado")
+    return InstallmentOut(**_installment_compute(res))
+
+@api_router.delete("/installments/{i_id}")
+async def delete_installment(i_id: str, current=Depends(get_current_user)):
+    res = await db.installments.delete_one({"id": i_id, "user_id": current['id']})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Parcelamento não encontrado")
+    return {"ok": True}
+
+# ---------- SUBSCRIPTIONS ----------
+def _subscription_compute(doc: dict) -> dict:
+    amt = float(doc['amount'])
+    monthly = amt if doc['billing_cycle'] == 'monthly' else amt / 12.0
+    return {**doc, "monthly_cost": round(monthly, 2)}
+
+@api_router.post("/subscriptions", response_model=SubscriptionOut)
+async def create_subscription(payload: SubscriptionCreate, current=Depends(get_current_user)):
+    doc = {
+        "id": str(uuid.uuid4()),
+        "user_id": current['id'],
+        "name": payload.name.strip(),
+        "amount": float(payload.amount),
+        "billing_cycle": payload.billing_cycle,
+        "next_billing_date": payload.next_billing_date,
+        "color": payload.color or "#8B5CF6",
+        "icon": payload.icon or "repeat",
+        "active": payload.active,
+        "created_at": datetime.now(timezone.utc),
+    }
+    await db.subscriptions.insert_one(doc.copy())
+    return SubscriptionOut(**_subscription_compute(doc))
+
+@api_router.get("/subscriptions", response_model=List[SubscriptionOut])
+async def list_subscriptions(current=Depends(get_current_user)):
+    items = await db.subscriptions.find({"user_id": current['id']}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    return [SubscriptionOut(**_subscription_compute(i)) for i in items]
+
+@api_router.patch("/subscriptions/{sub_id}", response_model=SubscriptionOut)
+async def update_subscription(sub_id: str, payload: dict, current=Depends(get_current_user)):
+    allowed = {"name", "amount", "billing_cycle", "next_billing_date", "color", "icon", "active"}
+    update = {k: v for k, v in payload.items() if k in allowed and v is not None}
+    if not update:
+        raise HTTPException(status_code=400, detail="Nada para atualizar")
+    res = await db.subscriptions.find_one_and_update(
+        {"id": sub_id, "user_id": current['id']}, {"$set": update},
+        return_document=True, projection={"_id": 0},
+    )
+    if not res:
+        raise HTTPException(status_code=404, detail="Assinatura não encontrada")
+    return SubscriptionOut(**_subscription_compute(res))
+
+@api_router.delete("/subscriptions/{sub_id}")
+async def delete_subscription(sub_id: str, current=Depends(get_current_user)):
+    res = await db.subscriptions.delete_one({"id": sub_id, "user_id": current['id']})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Assinatura não encontrada")
+    return {"ok": True}
+
+# ---------- CATEGORIES ----------
+DEFAULT_CATEGORIES = [
+    {"name": "Alimentação", "type": "expense", "color": "#F59E0B", "icon": "fast-food"},
+    {"name": "Transporte", "type": "expense", "color": "#3B82F6", "icon": "car"},
+    {"name": "Moradia", "type": "expense", "color": "#8B5CF6", "icon": "home"},
+    {"name": "Lazer", "type": "expense", "color": "#EC4899", "icon": "game-controller"},
+    {"name": "Saúde", "type": "expense", "color": "#EF4444", "icon": "medkit"},
+    {"name": "Educação", "type": "expense", "color": "#06B6D4", "icon": "school"},
+    {"name": "Compras", "type": "expense", "color": "#F97316", "icon": "bag"},
+    {"name": "Outros", "type": "expense", "color": "#737373", "icon": "ellipsis-horizontal"},
+    {"name": "Salário", "type": "income", "color": "#16A34A", "icon": "cash"},
+    {"name": "Investimentos", "type": "income", "color": "#10B981", "icon": "trending-up"},
+]
+
+@api_router.post("/categories", response_model=CategoryOut)
+async def create_category(payload: CategoryCreate, current=Depends(get_current_user)):
+    doc = {
+        "id": str(uuid.uuid4()),
+        "user_id": current['id'],
+        "name": payload.name.strip(),
+        "type": payload.type,
+        "color": payload.color or "#16A34A",
+        "icon": payload.icon or "pricetag",
+        "created_at": datetime.now(timezone.utc),
+    }
+    await db.categories.insert_one(doc.copy())
+    return CategoryOut(**doc)
+
+@api_router.get("/categories", response_model=List[CategoryOut])
+async def list_categories(current=Depends(get_current_user)):
+    items = await db.categories.find({"user_id": current['id']}, {"_id": 0}).sort("created_at", 1).to_list(200)
+    if not items:
+        # seed defaults for new user
+        now = datetime.now(timezone.utc)
+        seeds = [
+            {**c, "id": str(uuid.uuid4()), "user_id": current['id'], "created_at": now}
+            for c in DEFAULT_CATEGORIES
+        ]
+        await db.categories.insert_many([s.copy() for s in seeds])
+        items = seeds
+    return [CategoryOut(**i) for i in items]
+
+@api_router.delete("/categories/{cat_id}")
+async def delete_category(cat_id: str, current=Depends(get_current_user)):
+    res = await db.categories.delete_one({"id": cat_id, "user_id": current['id']})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Categoria não encontrada")
+    return {"ok": True}
+
+# ---------- PROJECTION ----------
+@api_router.get("/projection")
+async def projection(months: int = 6, current=Depends(get_current_user)):
+    if months < 1 or months > 24:
+        months = 6
+    user_id = current['id']
+    now = datetime.now(timezone.utc)
+
+    # Current balance
+    pipe_total = [
+        {"$match": {"user_id": user_id}},
+        {"$group": {"_id": "$type", "total": {"$sum": "$amount"}}}
+    ]
+    totals = {"income": 0.0, "expense": 0.0}
+    async for row in db.transactions.aggregate(pipe_total):
+        totals[row['_id']] = float(row['total'])
+    balance = totals['income'] - totals['expense']
+
+    # Average monthly savings over last 3 months
+    last3_inc = 0.0
+    last3_exp = 0.0
+    months_counted = 0
+    for i in range(3):
+        y = now.year; m = now.month - i
+        while m <= 0: m += 12; y -= 1
+        start = datetime(y, m, 1, tzinfo=timezone.utc)
+        end = datetime(y + (1 if m == 12 else 0), 1 if m == 12 else m + 1, 1, tzinfo=timezone.utc)
+        pipe = [
+            {"$match": {"user_id": user_id, "date": {"$gte": start, "$lt": end}}},
+            {"$group": {"_id": "$type", "total": {"$sum": "$amount"}}}
+        ]
+        async for row in db.transactions.aggregate(pipe):
+            if row['_id'] == 'income': last3_inc += float(row['total'])
+            else: last3_exp += float(row['total'])
+        months_counted += 1
+    avg_inc = last3_inc / max(months_counted, 1)
+    avg_exp = last3_exp / max(months_counted, 1)
+
+    # Add committed fixed expenses (monthly) + subscriptions (monthly)
+    fixed_total = 0.0
+    async for fe in db.fixed_expenses.find({"user_id": user_id, "active": True}, {"_id": 0, "amount": 1}):
+        fixed_total += float(fe['amount'])
+
+    sub_total = 0.0
+    async for sub in db.subscriptions.find({"user_id": user_id, "active": True}, {"_id": 0, "amount": 1, "billing_cycle": 1}):
+        amt = float(sub['amount'])
+        sub_total += amt if sub['billing_cycle'] == 'monthly' else amt / 12.0
+
+    # Installments remaining per month (only those still active)
+    inst_monthly = 0.0
+    async for inst in db.installments.find({"user_id": user_id}, {"_id": 0}):
+        if inst['installments_paid'] < inst['installments_total']:
+            inst_monthly += float(inst['total_amount']) / max(inst['installments_total'], 1)
+
+    monthly_expense_projected = max(avg_exp, fixed_total + sub_total + inst_monthly)
+    monthly_net = avg_inc - monthly_expense_projected
+
+    projection_data = []
+    proj_balance = balance
+    for i in range(1, months + 1):
+        proj_balance += monthly_net
+        target_month = now.month + i
+        year_offset = (target_month - 1) // 12
+        target_month = ((target_month - 1) % 12) + 1
+        label_date = datetime(now.year + year_offset, target_month, 1)
+        projection_data.append({
+            "month": label_date.strftime("%b/%y"),
+            "projected_balance": round(proj_balance, 2),
+            "monthly_net": round(monthly_net, 2),
+        })
+
+    return {
+        "current_balance": round(balance, 2),
+        "avg_monthly_income": round(avg_inc, 2),
+        "avg_monthly_expense": round(monthly_expense_projected, 2),
+        "monthly_net": round(monthly_net, 2),
+        "fixed_total": round(fixed_total, 2),
+        "subscriptions_monthly": round(sub_total, 2),
+        "installments_monthly": round(inst_monthly, 2),
+        "projection": projection_data,
     }
 
 # ---------- CHAT (Nocker AI) ----------

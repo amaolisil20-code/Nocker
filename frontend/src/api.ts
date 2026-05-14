@@ -53,6 +53,43 @@ export const api = {
     request(`/goals/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteGoal: (id: string) => request(`/goals/${id}`, { method: 'DELETE' }),
 
+  // fixed expenses
+  listFixedExpenses: () => request('/fixed-expenses'),
+  createFixedExpense: (data: any) =>
+    request('/fixed-expenses', { method: 'POST', body: JSON.stringify(data) }),
+  updateFixedExpense: (id: string, data: any) =>
+    request(`/fixed-expenses/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteFixedExpense: (id: string) =>
+    request(`/fixed-expenses/${id}`, { method: 'DELETE' }),
+
+  // installments
+  listInstallments: () => request('/installments'),
+  createInstallment: (data: any) =>
+    request('/installments', { method: 'POST', body: JSON.stringify(data) }),
+  updateInstallment: (id: string, data: any) =>
+    request(`/installments/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteInstallment: (id: string) =>
+    request(`/installments/${id}`, { method: 'DELETE' }),
+
+  // subscriptions
+  listSubscriptions: () => request('/subscriptions'),
+  createSubscription: (data: any) =>
+    request('/subscriptions', { method: 'POST', body: JSON.stringify(data) }),
+  updateSubscription: (id: string, data: any) =>
+    request(`/subscriptions/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteSubscription: (id: string) =>
+    request(`/subscriptions/${id}`, { method: 'DELETE' }),
+
+  // categories
+  listCategories: () => request('/categories'),
+  createCategory: (data: any) =>
+    request('/categories', { method: 'POST', body: JSON.stringify(data) }),
+  deleteCategory: (id: string) =>
+    request(`/categories/${id}`, { method: 'DELETE' }),
+
+  // projection
+  projection: (months: number = 6) => request(`/projection?months=${months}`),
+
   // dashboard
   dashboard: () => request('/dashboard/summary'),
 

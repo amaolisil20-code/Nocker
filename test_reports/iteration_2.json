@@ -1,0 +1,51 @@
+{
+  "summary": "Phase A expansion fully verified end-to-end. Backend: 14/14 pytest tests pass for fixed-expenses, installments, subscriptions, categories (auto-seed 10 defaults + custom CRUD), projection (6/12/fallback) and regression on auth/transactions/cards/goals/dashboard. Computed fields (installments.monthly_amount/remaining_amount, subscriptions.monthly_cost yearly/12, projection.fixed_total/subscriptions_monthly/installments_monthly) all correct. Frontend: register flow → bottom tab bar shows 5 tabs (Início, Movimentos, Nocker IA center sparkle, Cartões, Mais). 'Mais' grid renders profile-card + all 7 tiles (testIDs: more-goals/-fixed-expenses/-installments/-subscriptions/-projection/-categories/-settings). Verified Gastos Fixos screen creates entry (R$ 1.500 visible, active toggle UI present); Parcelados screen computes R$500/mês for 6000/12; Assinaturas creates Netflix R$50. Projection & Categories pages reachable (10 default categories visible: Alimentação/Transporte/Moradia/Lazer/Saúde/Educação/Compras/Outros/Salário/Investimentos, grouped Despesas/Receitas, add-cat modal opens). Existing Dashboard/Movimentos/Cartões/Chat still load.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "SubHeader (sub-back)",
+        "issue": "router.back() from sub-screens (fixed-expenses, installments, subscriptions, projection, categories) navigates user to /dashboard (Início tab) instead of returning to /more (Mais tab). Reproduced 3 times. Likely cause: in expo-router with Tabs, when a hidden tab screen is pushed and the user pops, router.back() falls back to the default tab. Use router.replace('/(tabs)/more') or router.push('/(tabs)/more') instead of router.back(), OR use a navigation history check.",
+        "testID": "sub-back",
+        "priority": "MEDIUM"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "global", "issues": ["Persistent RN-Web warnings: 'shadow*' deprecated (use boxShadow) and props.pointerEvents deprecated (use style.pointerEvents). Cosmetic — no functional impact. Also appears in _layout.tsx center tab icon."]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_phase_a.py",
+    "/app/backend/tests/test_nocker_backend.py",
+    "/app/test_reports/pytest/phase_a_results.xml",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Fix sub-back navigation: replace `router.back()` in SubHeader (/app/frontend/src/components/SubHeader.tsx) with `router.replace('/(tabs)/more')` (or router.canGoBack() ? router.back() : router.replace('/(tabs)/more')) so that sub-screens always return to the Mais grid instead of bouncing to the Início tab.",
+    "(Optional cosmetic) Replace deprecated shadow* style props with boxShadow on the center Nocker IA tab icon and elsewhere."
+  ],
+  "critical_code_review_comments": [
+    "server.py extended cleanly with new endpoints; all collections excluded `_id` via projection; PATCH endpoints correctly whitelist allowed fields and return 400 on empty payloads.",
+    "_installment_compute() and _subscription_compute() centralise the monthly_amount/monthly_cost math — DRY and consistent between POST/GET/PATCH.",
+    "Category auto-seed is idempotent: only seeds when list is empty for the user. Verified via repeated GET returning exactly 10 each time.",
+    "Projection caps months at 1..24 (out-of-range falls back to 6) and floors monthly_expense_projected at max(avg_exp, fixed+subs+inst) — sensible.",
+    "SubHeader is the only place using router.back() — single point of fix for the navigation issue above."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_phase_a.py (new — 14 tests for Phase A)"
+  ],
+  "success_rate": {
+    "backend": "100% (14/14 phase-A) + previous 14/14 regression suite still green",
+    "frontend": "~92% — all screens render, all create flows work, all testIDs present; the sub-back back-navigation lands on Início instead of Mais (single navigation bug)."
+  },
+  "seed_data_creation": "Created multiple test users via /api/auth/register (test_pa_<uuid>, e2e_pa_<ts>, e2e_pa2_<ts>, e2e_pa3_<ts>). Each user automatically gets 10 default categories on first GET /api/categories.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Tab bar 'Mais' tab is reachable via page.get_by_text('Mais', exact=True).first.click(force=True). Sub-screens use SubHeader with testIDs: sub-back, add-fixed/add-inst/add-sub/add-cat. Modals expose fe-name/fe-amount/save-fe, inst-name/inst-total/save-inst, sub-name/sub-amount/save-sub, cat-name/save-cat. Categories auto-seeds 10 defaults on first GET — second user registration always starts with full default list. Projection chips are '3 meses', '6 meses', '12 meses'. Known issue: after pressing sub-back the app lands on /dashboard, so navigate back to Mais explicitly between sub-screen tests.",
+  "rca_of_issue": "sub-back navigation bug RCA: SubHeader.tsx calls router.back(). In expo-router with Tabs.Screen href:null hidden tabs, the back stack for a hidden tab inside the same (tabs) group can pop to the *default* tab (Início/dashboard) instead of the previously focused tab (Mais), because hidden tabs share the tab navigator stack and 'back' targets the parent tab navigator's initial route. Reproduction: register → tap 'Mais' tab → tap any tile (e.g., more-fixed-expenses) → tap sub-back → user lands on /dashboard instead of /more. Mitigation: change router.back() to router.replace('/(tabs)/more') in /app/frontend/src/components/SubHeader.tsx line 11."
+}
