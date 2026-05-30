@@ -7,7 +7,8 @@ import { useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api } from '../../src/api';
-import { theme, fmtBRL } from '../../src/theme';
+import { fmtBRL } from '../../src/theme';
+import { useTheme } from '../../src/ThemeContext';
 import { SubHeader } from '../../src/components/SubHeader';
 
 const COLORS = ['#8B5CF6', '#EC4899', '#3B82F6', '#16A34A', '#F59E0B', '#EF4444'];
@@ -24,6 +25,8 @@ const ICONS = [
 
 export default function Subscriptions() {
   const insets = useSafeAreaInsets();
+  const { colors } = useTheme();
+  const s = makeStyles(colors);
   const [items, setItems] = useState<any[]>([]);
   const [modal, setModal] = useState(false);
   const [name, setName] = useState('');
@@ -82,7 +85,7 @@ export default function Subscriptions() {
 
         {items.length === 0 && (
           <View style={s.empty}>
-            <Ionicons name="repeat-outline" size={48} color={theme.colors.textTertiary} />
+            <Ionicons name="repeat-outline" size={48} color={colors.textTertiary} />
             <Text style={s.emptyTxt}>Nenhuma assinatura</Text>
             <Text style={s.emptySub}>Adicione streamings, cloud, academia...</Text>
           </View>
@@ -94,13 +97,13 @@ export default function Subscriptions() {
               <Ionicons name={item.icon as any} size={22} color={item.color} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={[s.itemName, !item.active && { color: theme.colors.textTertiary }]}>{item.name}</Text>
+              <Text style={[s.itemName, !item.active && { color: colors.textTertiary }]}>{item.name}</Text>
               <Text style={s.itemSub}>
                 {item.billing_cycle === 'monthly' ? 'Mensal' : 'Anual'} • {fmtBRL(item.amount)}
               </Text>
             </View>
             <View style={{ alignItems: 'flex-end' }}>
-              <Text style={[s.itemAmt, !item.active && { color: theme.colors.textTertiary }]}>{fmtBRL(item.monthly_cost)}</Text>
+              <Text style={[s.itemAmt, !item.active && { color: colors.textTertiary }]}>{fmtBRL(item.monthly_cost)}</Text>
               <Text style={s.itemMeta}>/mês</Text>
             </View>
           </TouchableOpacity>
@@ -116,11 +119,11 @@ export default function Subscriptions() {
             <Text style={s.sheetTitle}>Nova assinatura</Text>
 
             <Text style={s.label}>Nome do serviço</Text>
-            <TextInput testID="sub-name" placeholder="Ex: Netflix, Spotify..." placeholderTextColor={theme.colors.textTertiary}
+            <TextInput testID="sub-name" placeholder="Ex: Netflix, Spotify..." placeholderTextColor={colors.textTertiary}
               value={name} onChangeText={setName} style={s.input} />
 
             <Text style={s.label}>Valor</Text>
-            <TextInput testID="sub-amount" placeholder="0,00" placeholderTextColor={theme.colors.textTertiary}
+            <TextInput testID="sub-amount" placeholder="0,00" placeholderTextColor={colors.textTertiary}
               value={amount} onChangeText={setAmount} keyboardType="decimal-pad" style={s.input} />
 
             <Text style={s.label}>Cobrança</Text>
@@ -137,7 +140,7 @@ export default function Subscriptions() {
             <View style={s.chipRow}>
               {ICONS.map(ic => (
                 <TouchableOpacity key={ic.key} style={[s.iconBtn, icon === ic.key && s.iconActive]} onPress={() => setIcon(ic.key)}>
-                  <Ionicons name={ic.key as any} size={18} color={icon === ic.key ? '#fff' : theme.colors.textSecondary} />
+                  <Ionicons name={ic.key as any} size={18} color={icon === ic.key ? '#fff' : colors.textSecondary} />
                 </TouchableOpacity>
               ))}
             </View>
@@ -159,38 +162,38 @@ export default function Subscriptions() {
   );
 }
 
-const s = StyleSheet.create({
-  c: { flex: 1, backgroundColor: theme.colors.bg, paddingHorizontal: 20 },
+const makeStyles = (colors: any) => StyleSheet.create({
+  c: { flex: 1, backgroundColor: colors.bg, paddingHorizontal: 20 },
   summaryRow: { flexDirection: 'row', gap: 10, marginBottom: 14 },
-  sumBox: { flex: 1, backgroundColor: theme.colors.surface, borderRadius: 18, padding: 16, borderWidth: 1, borderColor: theme.colors.border },
-  sumLabel: { color: theme.colors.textSecondary, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.6 },
+  sumBox: { flex: 1, backgroundColor: colors.surface, borderRadius: 18, padding: 16, borderWidth: 1, borderColor: colors.border },
+  sumLabel: { color: colors.textSecondary, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.6 },
   sumVal: { color: '#fff', fontSize: 20, fontWeight: '800', marginTop: 4 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, marginVertical: 4,
-    backgroundColor: theme.colors.surface, borderRadius: 16, borderWidth: 1, borderColor: theme.colors.border },
+    backgroundColor: colors.surface, borderRadius: 16, borderWidth: 1, borderColor: colors.border },
   itemIcon: { width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
   itemName: { color: '#fff', fontSize: 14, fontWeight: '600' },
-  itemSub: { color: theme.colors.textTertiary, fontSize: 11, marginTop: 2 },
+  itemSub: { color: colors.textTertiary, fontSize: 11, marginTop: 2 },
   itemAmt: { color: '#fff', fontSize: 14, fontWeight: '700' },
-  itemMeta: { color: theme.colors.textTertiary, fontSize: 10 },
-  hint: { color: theme.colors.textTertiary, fontSize: 10, textAlign: 'center', marginTop: 16 },
+  itemMeta: { color: colors.textTertiary, fontSize: 10 },
+  hint: { color: colors.textTertiary, fontSize: 10, textAlign: 'center', marginTop: 16 },
   empty: { alignItems: 'center', paddingVertical: 60, gap: 6 },
   emptyTxt: { color: '#fff', fontSize: 15, fontWeight: '600', marginTop: 12 },
-  emptySub: { color: theme.colors.textTertiary, fontSize: 12, textAlign: 'center', paddingHorizontal: 40 },
+  emptySub: { color: colors.textTertiary, fontSize: 12, textAlign: 'center', paddingHorizontal: 40 },
   modalRoot: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
-  sheet: { backgroundColor: theme.colors.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 22, maxHeight: '90%' },
-  sheetHandle: { width: 44, height: 4, borderRadius: 2, backgroundColor: theme.colors.border, alignSelf: 'center', marginBottom: 14 },
+  sheet: { backgroundColor: colors.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 22, maxHeight: '90%' },
+  sheetHandle: { width: 44, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: 'center', marginBottom: 14 },
   sheetTitle: { color: '#fff', fontSize: 20, fontWeight: '700', marginBottom: 16 },
-  label: { color: theme.colors.textSecondary, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 12, marginBottom: 8 },
-  input: { backgroundColor: theme.colors.surfaceElevated, borderRadius: 14, paddingHorizontal: 14, height: 48, color: '#fff',
-    borderWidth: 1, borderColor: theme.colors.border, fontSize: 15 },
-  cycleBtn: { flex: 1, paddingVertical: 12, borderRadius: 12, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceElevated, alignItems: 'center' },
-  cycleActive: { backgroundColor: theme.colors.primary, borderColor: theme.colors.primary },
-  cycleTxt: { color: theme.colors.textSecondary, fontWeight: '700' },
+  label: { color: colors.textSecondary, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 12, marginBottom: 8 },
+  input: { backgroundColor: colors.surfaceElevated, borderRadius: 14, paddingHorizontal: 14, height: 48, color: '#fff',
+    borderWidth: 1, borderColor: colors.border, fontSize: 15 },
+  cycleBtn: { flex: 1, paddingVertical: 12, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceElevated, alignItems: 'center' },
+  cycleActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  cycleTxt: { color: colors.textSecondary, fontWeight: '700' },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  iconBtn: { width: 44, height: 44, borderRadius: 12, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceElevated, alignItems: 'center', justifyContent: 'center' },
-  iconActive: { backgroundColor: theme.colors.primary, borderColor: theme.colors.primary },
+  iconBtn: { width: 44, height: 44, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceElevated, alignItems: 'center', justifyContent: 'center' },
+  iconActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   colorDot: { width: 36, height: 36, borderRadius: 18, borderWidth: 2, borderColor: 'transparent' },
   colorActive: { borderColor: '#fff' },
-  saveBtn: { backgroundColor: theme.colors.primary, borderRadius: 999, height: 52, alignItems: 'center', justifyContent: 'center', marginTop: 20 },
+  saveBtn: { backgroundColor: colors.primary, borderRadius: 999, height: 52, alignItems: 'center', justifyContent: 'center', marginTop: 20 },
   saveTxt: { color: '#fff', fontWeight: '700', fontSize: 15 },
 });

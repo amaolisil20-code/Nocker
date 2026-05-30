@@ -2,19 +2,20 @@ import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { View, Platform } from 'react-native';
 import { BlurView } from 'expo-blur';
-import { theme } from '../../src/theme';
+import { useTheme } from '../../src/ThemeContext';
 
 export default function TabsLayout() {
+  const { colors, themeMode, t } = useTheme();
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: theme.colors.primary,
-        tabBarInactiveTintColor: theme.colors.textTertiary,
+        tabBarActiveTintColor: colors.primary,
+        tabBarInactiveTintColor: colors.textTertiary,
         tabBarStyle: {
           position: 'absolute',
-          backgroundColor: 'rgba(10,10,10,0.92)',
-          borderTopColor: theme.colors.border,
+          backgroundColor: themeMode === 'dark' ? 'rgba(10,10,10,0.92)' : 'rgba(245,245,245,0.92)',
+          borderTopColor: colors.border,
           borderTopWidth: 0.5,
           height: Platform.OS === 'ios' ? 86 : 68,
           paddingBottom: Platform.OS === 'ios' ? 28 : 10,
@@ -22,35 +23,35 @@ export default function TabsLayout() {
         },
         tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
         tabBarBackground: () => (
-          <BlurView intensity={40} tint="dark" style={{ flex: 1 }} />
+          <BlurView intensity={40} tint={themeMode === 'dark' ? 'dark' : 'light'} style={{ flex: 1 }} />
         ),
-        sceneStyle: { backgroundColor: theme.colors.bg },
+        sceneStyle: { backgroundColor: colors.bg },
       }}
     >
       <Tabs.Screen
         name="dashboard"
         options={{
-          title: 'Início',
+          title: t.home,
           tabBarIcon: ({ color, size }) => <Ionicons name="home" size={size} color={color} />,
         }}
       />
       <Tabs.Screen
         name="transactions"
         options={{
-          title: 'Movimentos',
+          title: t.transactions,
           tabBarIcon: ({ color, size }) => <Ionicons name="swap-horizontal" size={size} color={color} />,
         }}
       />
       <Tabs.Screen
         name="chat"
         options={{
-          title: 'Nocker IA',
+          title: t.nockerIA,
           tabBarIcon: ({ color }) => (
             <View
               style={{
-                width: 48, height: 48, borderRadius: 24, backgroundColor: theme.colors.primary,
+                width: 48, height: 48, borderRadius: 24, backgroundColor: colors.primary,
                 alignItems: 'center', justifyContent: 'center', marginTop: -18,
-                shadowColor: theme.colors.primary, shadowOpacity: 0.6, shadowRadius: 12, shadowOffset: { width: 0, height: 0 },
+                shadowColor: colors.primary, shadowOpacity: 0.6, shadowRadius: 12, shadowOffset: { width: 0, height: 0 },
                 elevation: 8,
               }}
             >
@@ -62,14 +63,14 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="cards"
         options={{
-          title: 'Cartões',
+          title: t.cards,
           tabBarIcon: ({ color, size }) => <Ionicons name="card" size={size} color={color} />,
         }}
       />
       <Tabs.Screen
         name="more"
         options={{
-          title: 'Mais',
+          title: t.more,
           tabBarIcon: ({ color, size }) => <Ionicons name="grid" size={size} color={color} />,
         }}
       />

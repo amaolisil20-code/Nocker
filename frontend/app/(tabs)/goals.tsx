@@ -8,12 +8,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api } from '../../src/api';
-import { theme, fmtBRL } from '../../src/theme';
+import { fmtBRL } from '../../src/theme';
+import { useTheme } from '../../src/ThemeContext';
 
 const COLORS = ['#16A34A', '#3B82F6', '#F59E0B', '#EC4899', '#8B5CF6', '#06B6D4'];
 
 export default function Goals() {
   const insets = useSafeAreaInsets();
+  const { colors } = useTheme();
+  const s = makeStyles(colors);
   const params = useLocalSearchParams<{ open?: string }>();
   const [items, setItems] = useState<any[]>([]);
   const [modal, setModal] = useState(false);
@@ -68,7 +71,7 @@ export default function Goals() {
       <ScrollView contentContainerStyle={{ paddingBottom: 120, paddingTop: 14 }} showsVerticalScrollIndicator={false}>
         {items.length === 0 && (
           <View style={s.empty}>
-            <Ionicons name="trophy-outline" size={48} color={theme.colors.textTertiary} />
+            <Ionicons name="trophy-outline" size={48} color={colors.textTertiary} />
             <Text style={s.emptyTxt}>Sem metas ainda</Text>
             <Text style={s.emptySub}>Crie sua primeira meta financeira</Text>
           </View>
@@ -108,11 +111,11 @@ export default function Goals() {
             <Text style={s.sheetTitle}>Nova meta</Text>
 
             <Text style={s.label}>Título</Text>
-            <TextInput testID="goal-title" placeholder="Ex: Viagem, Carro novo..." placeholderTextColor={theme.colors.textTertiary}
+            <TextInput testID="goal-title" placeholder="Ex: Viagem, Carro novo..." placeholderTextColor={colors.textTertiary}
               value={title} onChangeText={setTitle} style={s.input} />
 
             <Text style={s.label}>Valor da meta</Text>
-            <TextInput testID="goal-target" placeholder="0,00" placeholderTextColor={theme.colors.textTertiary}
+            <TextInput testID="goal-target" placeholder="0,00" placeholderTextColor={colors.textTertiary}
               value={target} onChangeText={setTarget} keyboardType="decimal-pad" style={s.input} />
 
             <Text style={s.label}>Valor inicial (opcional)</Text>
@@ -135,34 +138,34 @@ export default function Goals() {
   );
 }
 
-const s = StyleSheet.create({
-  c: { flex: 1, backgroundColor: theme.colors.bg, paddingHorizontal: 20 },
+const makeStyles = (colors: any) => StyleSheet.create({
+  c: { flex: 1, backgroundColor: colors.bg, paddingHorizontal: 20 },
   headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   title: { color: '#fff', fontSize: 26, fontWeight: '800', letterSpacing: -0.5 },
-  subtitle: { color: theme.colors.textSecondary, fontSize: 13, marginTop: 2 },
-  addBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: theme.colors.primary, alignItems: 'center', justifyContent: 'center' },
-  goalCard: { borderRadius: 20, padding: 18, marginVertical: 8, borderWidth: 1, backgroundColor: theme.colors.surface, overflow: 'hidden' },
+  subtitle: { color: colors.textSecondary, fontSize: 13, marginTop: 2 },
+  addBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+  goalCard: { borderRadius: 20, padding: 18, marginVertical: 8, borderWidth: 1, backgroundColor: colors.surface, overflow: 'hidden' },
   goalRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   goalIcon: { width: 50, height: 50, borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
   goalTitle: { color: '#fff', fontSize: 15, fontWeight: '700' },
-  goalSub: { color: theme.colors.textSecondary, fontSize: 12, marginTop: 3 },
+  goalSub: { color: colors.textSecondary, fontSize: 12, marginTop: 3 },
   goalPct: { fontSize: 20, fontWeight: '800' },
-  progressBar: { height: 8, borderRadius: 4, backgroundColor: theme.colors.surfaceElevated, marginTop: 14, overflow: 'hidden' },
+  progressBar: { height: 8, borderRadius: 4, backgroundColor: colors.surfaceElevated, marginTop: 14, overflow: 'hidden' },
   progressFill: { height: '100%', borderRadius: 4 },
-  goalHint: { color: theme.colors.textTertiary, fontSize: 10, marginTop: 8 },
+  goalHint: { color: colors.textTertiary, fontSize: 10, marginTop: 8 },
   empty: { alignItems: 'center', paddingVertical: 80, gap: 6 },
   emptyTxt: { color: '#fff', fontSize: 15, fontWeight: '600', marginTop: 12 },
-  emptySub: { color: theme.colors.textTertiary, fontSize: 12 },
+  emptySub: { color: colors.textTertiary, fontSize: 12 },
   modalRoot: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
-  sheet: { backgroundColor: theme.colors.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 22, maxHeight: '90%' },
-  sheetHandle: { width: 44, height: 4, borderRadius: 2, backgroundColor: theme.colors.border, alignSelf: 'center', marginBottom: 14 },
+  sheet: { backgroundColor: colors.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 22, maxHeight: '90%' },
+  sheetHandle: { width: 44, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: 'center', marginBottom: 14 },
   sheetTitle: { color: '#fff', fontSize: 20, fontWeight: '700', marginBottom: 16 },
-  label: { color: theme.colors.textSecondary, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 12, marginBottom: 8 },
-  input: { backgroundColor: theme.colors.surfaceElevated, borderRadius: 14, paddingHorizontal: 14, height: 48, color: '#fff',
-    borderWidth: 1, borderColor: theme.colors.border, fontSize: 15 },
+  label: { color: colors.textSecondary, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 12, marginBottom: 8 },
+  input: { backgroundColor: colors.surfaceElevated, borderRadius: 14, paddingHorizontal: 14, height: 48, color: '#fff',
+    borderWidth: 1, borderColor: colors.border, fontSize: 15 },
   colorRow: { flexDirection: 'row', gap: 10, flexWrap: 'wrap' },
   colorDot: { width: 36, height: 36, borderRadius: 18, borderWidth: 2, borderColor: 'transparent' },
   colorActive: { borderColor: '#fff' },
-  saveBtn: { backgroundColor: theme.colors.primary, borderRadius: 999, height: 52, alignItems: 'center', justifyContent: 'center', marginTop: 20 },
+  saveBtn: { backgroundColor: colors.primary, borderRadius: 999, height: 52, alignItems: 'center', justifyContent: 'center', marginTop: 20 },
   saveTxt: { color: '#fff', fontWeight: '700', fontSize: 15 },
 });

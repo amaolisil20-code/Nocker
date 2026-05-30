@@ -7,7 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api } from '../../src/api';
-import { theme } from '../../src/theme';
+import { useTheme } from '../../src/ThemeContext';
 
 type Msg = { role: 'user' | 'assistant'; content: string; pending?: boolean };
 
@@ -20,6 +20,8 @@ const SUGGESTIONS = [
 
 export default function Chat() {
   const insets = useSafeAreaInsets();
+  const { colors, t, themeMode } = useTheme();
+  const s = makeStyles(colors, themeMode);
   const [messages, setMessages] = useState<Msg[]>([]);
   const [text, setText] = useState('');
   const [sessionId, setSessionId] = useState<string | undefined>();
@@ -66,13 +68,13 @@ export default function Chat() {
       keyboardVerticalOffset={Platform.OS === 'ios' ? 80 : 0}
       style={s.c}
     >
-      <LinearGradient colors={['#0F1F14', '#0A0A0A']} style={[StyleSheet.absoluteFill, { height: 200 }]} />
+      <LinearGradient colors={themeMode === 'dark' ? ['#0F1F14', '#0A0A0A'] : ['#E8F5E9', '#F5F5F5']} style={[StyleSheet.absoluteFill, { height: 200 }]} />
       <View style={[s.header, { paddingTop: insets.top + 12 }]}>
         <View style={s.aiAvatar}>
           <Ionicons name="sparkles" size={20} color="#fff" />
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={s.headerTitle}>Nocker IA</Text>
+          <Text style={s.headerTitle}>{t.nockerIA}</Text>
           <View style={s.statusRow}>
             <View style={s.statusDot} />
             <Text style={s.statusTxt}>Online • Claude Sonnet 4.5</Text>
@@ -96,11 +98,11 @@ export default function Chat() {
             <View style={[s.bubble, m.role === 'user' ? s.bubbleUser : s.bubbleAi]}>
               {m.pending ? (
                 <View style={s.typingRow}>
-                  <ActivityIndicator color={theme.colors.primary} size="small" />
+                  <ActivityIndicator color={colors.primary} size="small" />
                   <Text style={s.typingTxt}>Nocker está pensando...</Text>
                 </View>
               ) : (
-                <Text style={[s.bubbleTxt, m.role === 'user' && { color: '#fff' }]}>{m.content}</Text>
+                <Text style={[s.bubbleTxt, m.role === 'user' ? { color: '#fff' } : { color: colors.text }]}>{m.content}</Text>
               )}
             </View>
           </View>
@@ -112,7 +114,7 @@ export default function Chat() {
             <View style={s.suggestionsGrid}>
               {SUGGESTIONS.map(sg => (
                 <TouchableOpacity key={sg} style={s.suggestionChip} onPress={() => send(sg.replace(/^[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]\s*/u, ''))}>
-                  <Text style={s.suggestionTxt}>{sg}</Text>
+                  <Text style={[s.suggestionTxt, { color: colors.text }]}>{sg}</Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -126,7 +128,7 @@ export default function Chat() {
             testID="chat-input"
             value={text} onChangeText={setText}
             placeholder="Pergunte algo financeiro..."
-            placeholderTextColor={theme.colors.textTertiary}
+            placeholderTextColor={colors.textTertiary}
             style={s.input}
             multiline
             onSubmitEditing={() => send()}
@@ -140,32 +142,32 @@ export default function Chat() {
   );
 }
 
-const s = StyleSheet.create({
-  c: { flex: 1, backgroundColor: theme.colors.bg },
+const makeStyles = (colors: any, themeMode: string) => StyleSheet.create({
+  c: { flex: 1, backgroundColor: colors.bg },
   header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingBottom: 14,
-    borderBottomWidth: 1, borderBottomColor: theme.colors.border },
-  aiAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: theme.colors.primary, alignItems: 'center', justifyContent: 'center',
-    shadowColor: theme.colors.primary, shadowOpacity: 0.6, shadowRadius: 14 },
-  headerTitle: { color: '#fff', fontSize: 18, fontWeight: '700' },
+    borderBottomWidth: 1, borderBottomColor: colors.border },
+  aiAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center',
+    shadowColor: colors.primary, shadowOpacity: 0.6, shadowRadius: 14 },
+  headerTitle: { color: colors.text, fontSize: 18, fontWeight: '700' },
   statusRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 },
-  statusDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: theme.colors.primary },
-  statusTxt: { color: theme.colors.textSecondary, fontSize: 11 },
+  statusDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.primary },
+  statusTxt: { color: colors.textSecondary, fontSize: 11 },
   bubbleRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 6, marginBottom: 12 },
-  smallAi: { width: 22, height: 22, borderRadius: 11, backgroundColor: theme.colors.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
+  smallAi: { width: 22, height: 22, borderRadius: 11, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
   bubble: { maxWidth: '82%', paddingHorizontal: 14, paddingVertical: 12, borderRadius: 18 },
-  bubbleUser: { backgroundColor: theme.colors.primary, borderTopRightRadius: 4 },
-  bubbleAi: { backgroundColor: theme.colors.surface, borderTopLeftRadius: 4, borderWidth: 1, borderColor: theme.colors.border },
-  bubbleTxt: { color: '#fff', fontSize: 14, lineHeight: 21 },
+  bubbleUser: { backgroundColor: colors.primary, borderTopRightRadius: 4 },
+  bubbleAi: { backgroundColor: colors.surface, borderTopLeftRadius: 4, borderWidth: 1, borderColor: colors.border },
+  bubbleTxt: { fontSize: 14, lineHeight: 21 },
   typingRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  typingTxt: { color: theme.colors.textSecondary, fontSize: 13, fontStyle: 'italic' },
+  typingTxt: { color: colors.textSecondary, fontSize: 13, fontStyle: 'italic' },
   suggestionsWrap: { marginTop: 8 },
-  suggestionsHint: { color: theme.colors.textTertiary, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 10 },
+  suggestionsHint: { color: colors.textTertiary, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 10 },
   suggestionsGrid: { gap: 8 },
-  suggestionChip: { backgroundColor: theme.colors.surface, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: theme.colors.border },
-  suggestionTxt: { color: '#fff', fontSize: 13 },
-  inputBar: { paddingHorizontal: 16, paddingTop: 8, backgroundColor: theme.colors.bg, borderTopWidth: 1, borderTopColor: theme.colors.border },
-  inputWrap: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, backgroundColor: theme.colors.surface, borderRadius: 26,
-    paddingHorizontal: 16, paddingVertical: 6, borderWidth: 1, borderColor: theme.colors.border },
-  input: { flex: 1, color: '#fff', fontSize: 14, maxHeight: 100, paddingVertical: 10 },
-  sendBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: theme.colors.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 2 },
+  suggestionChip: { backgroundColor: colors.surface, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: colors.border },
+  suggestionTxt: { fontSize: 13 },
+  inputBar: { paddingHorizontal: 16, paddingTop: 8, backgroundColor: colors.bg, borderTopWidth: 1, borderTopColor: colors.border },
+  inputWrap: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, backgroundColor: colors.surface, borderRadius: 26,
+    paddingHorizontal: 16, paddingVertical: 6, borderWidth: 1, borderColor: colors.border },
+  input: { flex: 1, color: colors.text, fontSize: 14, maxHeight: 100, paddingVertical: 10 },
+  sendBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 2 },
 });

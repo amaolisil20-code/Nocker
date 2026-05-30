@@ -7,7 +7,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api } from '../../src/api';
-import { theme, fmtBRL } from '../../src/theme';
+import { fmtBRL } from '../../src/theme';
+import { useTheme } from '../../src/ThemeContext';
 import { SubHeader } from '../../src/components/SubHeader';
 import { LineChart } from '../../src/components/charts';
 
@@ -20,6 +21,8 @@ const RANGES = [
 
 export default function Projection() {
   const insets = useSafeAreaInsets();
+  const { colors } = useTheme();
+  const s = makeStyles(colors);
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [range, setRange] = useState(6);
@@ -49,16 +52,16 @@ export default function Projection() {
         </View>
 
         {loading ? (
-          <ActivityIndicator color={theme.colors.primary} style={{ marginTop: 60 }} />
+          <ActivityIndicator color={colors.primary} style={{ marginTop: 60 }} />
         ) : data ? (
           <>
             <View style={s.heroCard}>
               <LinearGradient colors={[positive ? 'rgba(22,163,74,0.25)' : 'rgba(239,68,68,0.18)', 'transparent']} style={StyleSheet.absoluteFill} />
               <Text style={s.heroLabel}>Saldo projetado em {range} {range === 1 ? 'mês' : 'meses'}</Text>
-              <Text style={[s.heroVal, { color: positive ? theme.colors.primary : theme.colors.expense }]}>{fmtBRL(finalBalance)}</Text>
+              <Text style={[s.heroVal, { color: positive ? colors.primary : colors.expense }]}>{fmtBRL(finalBalance)}</Text>
               <View style={s.netRow}>
-                <Ionicons name={positive ? 'trending-up' : 'trending-down'} size={16} color={positive ? theme.colors.primary : theme.colors.expense} />
-                <Text style={[s.netTxt, { color: positive ? theme.colors.primary : theme.colors.expense }]}>
+                <Ionicons name={positive ? 'trending-up' : 'trending-down'} size={16} color={positive ? colors.primary : colors.expense} />
+                <Text style={[s.netTxt, { color: positive ? colors.primary : colors.expense }]}>
                   {positive ? '+' : ''}{fmtBRL(data.monthly_net)} por mês
                 </Text>
               </View>
@@ -69,7 +72,7 @@ export default function Projection() {
               {projValues.length > 0 && (
                 <>
                   <LineChart data={[data.current_balance, ...projValues]} width={W - 80} height={160}
-                    stroke={positive ? theme.colors.primary : theme.colors.expense} />
+                    stroke={positive ? colors.primary : colors.expense} />
                   <View style={s.labelsRow}>
                     <Text style={s.evoLabel}>Hoje</Text>
                     {data.projection.map((p: any, i: number) => (
@@ -87,15 +90,15 @@ export default function Projection() {
               </View>
               <View style={s.metric}>
                 <Text style={s.metricLabel}>Receita média/mês</Text>
-                <Text style={[s.metricVal, { color: theme.colors.primary }]}>{fmtBRL(data.avg_monthly_income)}</Text>
+                <Text style={[s.metricVal, { color: colors.primary }]}>{fmtBRL(data.avg_monthly_income)}</Text>
               </View>
               <View style={s.metric}>
                 <Text style={s.metricLabel}>Despesa média/mês</Text>
-                <Text style={[s.metricVal, { color: theme.colors.expense }]}>{fmtBRL(data.avg_monthly_expense)}</Text>
+                <Text style={[s.metricVal, { color: colors.expense }]}>{fmtBRL(data.avg_monthly_expense)}</Text>
               </View>
               <View style={s.metric}>
                 <Text style={s.metricLabel}>Saldo mensal</Text>
-                <Text style={[s.metricVal, { color: positive ? theme.colors.primary : theme.colors.expense }]}>
+                <Text style={[s.metricVal, { color: positive ? colors.primary : colors.expense }]}>
                   {positive ? '+' : ''}{fmtBRL(data.monthly_net)}
                 </Text>
               </View>
@@ -103,16 +106,16 @@ export default function Projection() {
 
             <View style={s.breakdown}>
               <Text style={s.breakdownTitle}>Compromissos mensais</Text>
-              <BreakdownRow icon="calendar" color={theme.colors.expense} label="Gastos fixos" value={data.fixed_total} />
+              <BreakdownRow icon="calendar" color={colors.expense} label="Gastos fixos" value={data.fixed_total} />
               <BreakdownRow icon="repeat" color="#8B5CF6" label="Assinaturas" value={data.subscriptions_monthly} />
               <BreakdownRow icon="layers" color="#3B82F6" label="Parcelados" value={data.installments_monthly} />
               <View style={s.divider} />
-              <BreakdownRow icon="receipt" color={theme.colors.textSecondary} label="Total comprometido"
+              <BreakdownRow icon="receipt" color={colors.textSecondary} label="Total comprometido"
                 value={data.fixed_total + data.subscriptions_monthly + data.installments_monthly} bold />
             </View>
 
             <View style={s.tipCard}>
-              <Ionicons name="bulb" size={20} color={theme.colors.warning} />
+              <Ionicons name="bulb" size={20} color={colors.warning} />
               <Text style={s.tipTxt}>
                 {positive
                   ? 'Você está economizando! Continue assim e considere investir o excedente para acelerar suas metas.'
@@ -140,33 +143,33 @@ function BreakdownRow({ icon, color, label, value, bold }: any) {
   );
 }
 
-const s = StyleSheet.create({
-  c: { flex: 1, backgroundColor: theme.colors.bg, paddingHorizontal: 20 },
+const makeStyles = (colors: any) => StyleSheet.create({
+  c: { flex: 1, backgroundColor: colors.bg, paddingHorizontal: 20 },
   rangeRow: { flexDirection: 'row', gap: 8, marginBottom: 14 },
-  rangeBtn: { flex: 1, paddingVertical: 10, borderRadius: 999, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surface, alignItems: 'center' },
-  rangeActive: { backgroundColor: theme.colors.primary, borderColor: theme.colors.primary },
-  rangeTxt: { color: theme.colors.textSecondary, fontWeight: '700', fontSize: 12 },
-  heroCard: { borderRadius: 24, padding: 20, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surface, overflow: 'hidden' },
-  heroLabel: { color: theme.colors.textSecondary, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5 },
+  rangeBtn: { flex: 1, paddingVertical: 10, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, alignItems: 'center' },
+  rangeActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  rangeTxt: { color: colors.textSecondary, fontWeight: '700', fontSize: 12 },
+  heroCard: { borderRadius: 24, padding: 20, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, overflow: 'hidden' },
+  heroLabel: { color: colors.textSecondary, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5 },
   heroVal: { fontSize: 36, fontWeight: '800', letterSpacing: -1, marginTop: 6 },
   netRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
   netTxt: { fontSize: 13, fontWeight: '700' },
-  chartCard: { backgroundColor: theme.colors.surface, borderRadius: 20, padding: 18, marginTop: 14, borderWidth: 1, borderColor: theme.colors.border },
+  chartCard: { backgroundColor: colors.surface, borderRadius: 20, padding: 18, marginTop: 14, borderWidth: 1, borderColor: colors.border },
   cardTitle: { color: '#fff', fontSize: 14, fontWeight: '700', marginBottom: 10 },
   labelsRow: { flexDirection: 'row', justifyContent: 'space-around', marginTop: 6 },
-  evoLabel: { color: theme.colors.textTertiary, fontSize: 10 },
+  evoLabel: { color: colors.textTertiary, fontSize: 10 },
   metricsGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginTop: 14 },
-  metric: { width: '48%', backgroundColor: theme.colors.surface, borderRadius: 16, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: theme.colors.border },
-  metricLabel: { color: theme.colors.textSecondary, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 },
+  metric: { width: '48%', backgroundColor: colors.surface, borderRadius: 16, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: colors.border },
+  metricLabel: { color: colors.textSecondary, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 },
   metricVal: { color: '#fff', fontSize: 16, fontWeight: '800', marginTop: 4 },
-  breakdown: { backgroundColor: theme.colors.surface, borderRadius: 20, padding: 18, marginTop: 6, borderWidth: 1, borderColor: theme.colors.border },
+  breakdown: { backgroundColor: colors.surface, borderRadius: 20, padding: 18, marginTop: 6, borderWidth: 1, borderColor: colors.border },
   breakdownTitle: { color: '#fff', fontSize: 14, fontWeight: '700', marginBottom: 8 },
   bRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 },
   bIcon: { width: 28, height: 28, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
-  bLabel: { flex: 1, color: theme.colors.textSecondary, fontSize: 13 },
+  bLabel: { flex: 1, color: colors.textSecondary, fontSize: 13 },
   bVal: { color: '#fff', fontSize: 13, fontWeight: '700' },
-  divider: { height: 1, backgroundColor: theme.colors.border, marginVertical: 4 },
+  divider: { height: 1, backgroundColor: colors.border, marginVertical: 4 },
   tipCard: { flexDirection: 'row', gap: 10, padding: 14, backgroundColor: 'rgba(245,158,11,0.08)', borderRadius: 14, borderWidth: 1, borderColor: 'rgba(245,158,11,0.25)', marginTop: 14 },
-  tipTxt: { flex: 1, color: theme.colors.text, fontSize: 12, lineHeight: 18 },
-  empty: { color: theme.colors.textSecondary, fontSize: 13, textAlign: 'center', marginTop: 40 },
+  tipTxt: { flex: 1, color: colors.text, fontSize: 12, lineHeight: 18 },
+  empty: { color: colors.textSecondary, fontSize: 13, textAlign: 'center', marginTop: 40 },
 });

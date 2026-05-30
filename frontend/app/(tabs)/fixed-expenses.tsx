@@ -7,7 +7,8 @@ import { useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api } from '../../src/api';
-import { theme, fmtBRL } from '../../src/theme';
+import { fmtBRL } from '../../src/theme';
+import { useTheme } from '../../src/ThemeContext';
 import { SubHeader } from '../../src/components/SubHeader';
 
 const COLORS = ['#EF4444', '#F59E0B', '#3B82F6', '#8B5CF6', '#16A34A', '#EC4899'];
@@ -15,6 +16,8 @@ const CATEGORIES = ['Moradia', 'Transporte', 'Alimentação', 'Lazer', 'Saúde',
 
 export default function FixedExpenses() {
   const insets = useSafeAreaInsets();
+  const { colors } = useTheme();
+  const s = makeStyles(colors);
   const [items, setItems] = useState<any[]>([]);
   const [modal, setModal] = useState(false);
   const [name, setName] = useState('');
@@ -66,7 +69,7 @@ export default function FixedExpenses() {
 
         {items.length === 0 && (
           <View style={s.empty}>
-            <Ionicons name="calendar-outline" size={48} color={theme.colors.textTertiary} />
+            <Ionicons name="calendar-outline" size={48} color={colors.textTertiary} />
             <Text style={s.emptyTxt}>Nenhum gasto fixo</Text>
             <Text style={s.emptySub}>Adicione contas recorrentes (aluguel, luz, internet)</Text>
           </View>
@@ -78,11 +81,11 @@ export default function FixedExpenses() {
               <Ionicons name="calendar" size={20} color={item.color} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={[s.itemName, !item.active && { color: theme.colors.textTertiary }]}>{item.name}</Text>
+              <Text style={[s.itemName, !item.active && { color: colors.textTertiary }]}>{item.name}</Text>
               <Text style={s.itemSub}>{item.category} • dia {item.due_day}</Text>
             </View>
             <View style={{ alignItems: 'flex-end' }}>
-              <Text style={[s.itemAmt, !item.active && { color: theme.colors.textTertiary }]}>{fmtBRL(item.amount)}</Text>
+              <Text style={[s.itemAmt, !item.active && { color: colors.textTertiary }]}>{fmtBRL(item.amount)}</Text>
               <Text style={[s.statusPill, item.active ? s.statusActive : s.statusInactive]}>
                 {item.active ? 'ativo' : 'pausado'}
               </Text>
@@ -100,15 +103,15 @@ export default function FixedExpenses() {
             <Text style={s.sheetTitle}>Novo gasto fixo</Text>
 
             <Text style={s.label}>Nome</Text>
-            <TextInput testID="fe-name" placeholder="Ex: Aluguel, Internet..." placeholderTextColor={theme.colors.textTertiary}
+            <TextInput testID="fe-name" placeholder="Ex: Aluguel, Internet..." placeholderTextColor={colors.textTertiary}
               value={name} onChangeText={setName} style={s.input} />
 
             <Text style={s.label}>Valor mensal</Text>
-            <TextInput testID="fe-amount" placeholder="0,00" placeholderTextColor={theme.colors.textTertiary}
+            <TextInput testID="fe-amount" placeholder="0,00" placeholderTextColor={colors.textTertiary}
               value={amount} onChangeText={setAmount} keyboardType="decimal-pad" style={s.input} />
 
             <Text style={s.label}>Dia do vencimento</Text>
-            <TextInput placeholder="10" placeholderTextColor={theme.colors.textTertiary}
+            <TextInput placeholder="10" placeholderTextColor={colors.textTertiary}
               value={dueDay} onChangeText={setDueDay} keyboardType="number-pad" style={s.input} />
 
             <Text style={s.label}>Categoria</Text>
@@ -137,38 +140,38 @@ export default function FixedExpenses() {
   );
 }
 
-const s = StyleSheet.create({
-  c: { flex: 1, backgroundColor: theme.colors.bg, paddingHorizontal: 20 },
-  totalCard: { backgroundColor: theme.colors.surface, borderRadius: 20, padding: 18, borderWidth: 1, borderColor: theme.colors.border, marginBottom: 16 },
-  totalLabel: { color: theme.colors.textSecondary, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.6 },
+const makeStyles = (colors: any) => StyleSheet.create({
+  c: { flex: 1, backgroundColor: colors.bg, paddingHorizontal: 20 },
+  totalCard: { backgroundColor: colors.surface, borderRadius: 20, padding: 18, borderWidth: 1, borderColor: colors.border, marginBottom: 16 },
+  totalLabel: { color: colors.textSecondary, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.6 },
   totalVal: { color: '#fff', fontSize: 30, fontWeight: '800', letterSpacing: -0.6, marginTop: 4 },
-  totalSub: { color: theme.colors.textTertiary, fontSize: 12, marginTop: 4 },
+  totalSub: { color: colors.textTertiary, fontSize: 12, marginTop: 4 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, marginVertical: 4,
-    backgroundColor: theme.colors.surface, borderRadius: 16, borderWidth: 1, borderColor: theme.colors.border },
+    backgroundColor: colors.surface, borderRadius: 16, borderWidth: 1, borderColor: colors.border },
   itemIcon: { width: 42, height: 42, borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
   itemName: { color: '#fff', fontSize: 14, fontWeight: '600' },
-  itemSub: { color: theme.colors.textTertiary, fontSize: 11, marginTop: 2 },
+  itemSub: { color: colors.textTertiary, fontSize: 11, marginTop: 2 },
   itemAmt: { color: '#fff', fontSize: 14, fontWeight: '700' },
   statusPill: { fontSize: 10, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999, marginTop: 4, overflow: 'hidden', fontWeight: '700' },
-  statusActive: { color: theme.colors.primary, backgroundColor: theme.colors.successSoft },
-  statusInactive: { color: theme.colors.textTertiary, backgroundColor: 'rgba(255,255,255,0.05)' },
-  hint: { color: theme.colors.textTertiary, fontSize: 10, textAlign: 'center', marginTop: 16 },
+  statusActive: { color: colors.primary, backgroundColor: colors.successSoft },
+  statusInactive: { color: colors.textTertiary, backgroundColor: 'rgba(255,255,255,0.05)' },
+  hint: { color: colors.textTertiary, fontSize: 10, textAlign: 'center', marginTop: 16 },
   empty: { alignItems: 'center', paddingVertical: 60, gap: 6 },
   emptyTxt: { color: '#fff', fontSize: 15, fontWeight: '600', marginTop: 12 },
-  emptySub: { color: theme.colors.textTertiary, fontSize: 12, textAlign: 'center', paddingHorizontal: 40 },
+  emptySub: { color: colors.textTertiary, fontSize: 12, textAlign: 'center', paddingHorizontal: 40 },
   modalRoot: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
-  sheet: { backgroundColor: theme.colors.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 22, maxHeight: '90%' },
-  sheetHandle: { width: 44, height: 4, borderRadius: 2, backgroundColor: theme.colors.border, alignSelf: 'center', marginBottom: 14 },
+  sheet: { backgroundColor: colors.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 22, maxHeight: '90%' },
+  sheetHandle: { width: 44, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: 'center', marginBottom: 14 },
   sheetTitle: { color: '#fff', fontSize: 20, fontWeight: '700', marginBottom: 16 },
-  label: { color: theme.colors.textSecondary, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 12, marginBottom: 8 },
-  input: { backgroundColor: theme.colors.surfaceElevated, borderRadius: 14, paddingHorizontal: 14, height: 48, color: '#fff',
-    borderWidth: 1, borderColor: theme.colors.border, fontSize: 15 },
+  label: { color: colors.textSecondary, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 12, marginBottom: 8 },
+  input: { backgroundColor: colors.surfaceElevated, borderRadius: 14, paddingHorizontal: 14, height: 48, color: '#fff',
+    borderWidth: 1, borderColor: colors.border, fontSize: 15 },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceElevated },
-  chipActive: { backgroundColor: theme.colors.primary, borderColor: theme.colors.primary },
-  chipTxt: { color: theme.colors.textSecondary, fontSize: 12, fontWeight: '600' },
+  chip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceElevated },
+  chipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  chipTxt: { color: colors.textSecondary, fontSize: 12, fontWeight: '600' },
   colorDot: { width: 36, height: 36, borderRadius: 18, borderWidth: 2, borderColor: 'transparent' },
   colorActive: { borderColor: '#fff' },
-  saveBtn: { backgroundColor: theme.colors.primary, borderRadius: 999, height: 52, alignItems: 'center', justifyContent: 'center', marginTop: 20 },
+  saveBtn: { backgroundColor: colors.primary, borderRadius: 999, height: 52, alignItems: 'center', justifyContent: 'center', marginTop: 20 },
   saveTxt: { color: '#fff', fontWeight: '700', fontSize: 15 },
 });
