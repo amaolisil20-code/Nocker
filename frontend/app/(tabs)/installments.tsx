@@ -8,7 +8,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api } from '../../src/api';
-import { theme, fmtBRL } from '../../src/theme';
+import { fmtBRL } from '../../src/theme';
+import { useTheme } from '../../src/ThemeContext';
 import { SubHeader } from '../../src/components/SubHeader';
 
 const COLORS = ['#3B82F6', '#8B5CF6', '#EC4899', '#16A34A', '#F59E0B', '#EF4444'];
@@ -16,6 +17,8 @@ const CATEGORIES = ['Eletrônicos', 'Móveis', 'Vestuário', 'Educação', 'Viag
 
 export default function Installments() {
   const insets = useSafeAreaInsets();
+  const { colors } = useTheme();
+  const s = makeStyles(colors);
   const [items, setItems] = useState<any[]>([]);
   const [modal, setModal] = useState(false);
   const [name, setName] = useState('');
@@ -82,7 +85,7 @@ export default function Installments() {
 
         {items.length === 0 && (
           <View style={s.empty}>
-            <Ionicons name="layers-outline" size={48} color={theme.colors.textTertiary} />
+            <Ionicons name="layers-outline" size={48} color={colors.textTertiary} />
             <Text style={s.emptyTxt}>Nenhum parcelamento</Text>
             <Text style={s.emptySub}>Adicione compras parceladas para acompanhar</Text>
           </View>
@@ -130,11 +133,11 @@ export default function Installments() {
             <Text style={s.sheetTitle}>Novo parcelamento</Text>
 
             <Text style={s.label}>Nome</Text>
-            <TextInput testID="inst-name" placeholder="Ex: Notebook, Sofá..." placeholderTextColor={theme.colors.textTertiary}
+            <TextInput testID="inst-name" placeholder="Ex: Notebook, Sofá..." placeholderTextColor={colors.textTertiary}
               value={name} onChangeText={setName} style={s.input} />
 
             <Text style={s.label}>Valor total</Text>
-            <TextInput testID="inst-total" placeholder="0,00" placeholderTextColor={theme.colors.textTertiary}
+            <TextInput testID="inst-total" placeholder="0,00" placeholderTextColor={colors.textTertiary}
               value={total} onChangeText={setTotal} keyboardType="decimal-pad" style={s.input} />
 
             <View style={{ flexDirection: 'row', gap: 10 }}>
@@ -174,39 +177,39 @@ export default function Installments() {
   );
 }
 
-const s = StyleSheet.create({
-  c: { flex: 1, backgroundColor: theme.colors.bg, paddingHorizontal: 20 },
+const makeStyles = (colors: any) => StyleSheet.create({
+  c: { flex: 1, backgroundColor: colors.bg, paddingHorizontal: 20 },
   summaryRow: { flexDirection: 'row', gap: 10, marginBottom: 14 },
-  sumBox: { flex: 1, backgroundColor: theme.colors.surface, borderRadius: 18, padding: 16, borderWidth: 1, borderColor: theme.colors.border },
-  sumLabel: { color: theme.colors.textSecondary, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.6 },
+  sumBox: { flex: 1, backgroundColor: colors.surface, borderRadius: 18, padding: 16, borderWidth: 1, borderColor: colors.border },
+  sumLabel: { color: colors.textSecondary, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.6 },
   sumVal: { color: '#fff', fontSize: 20, fontWeight: '800', marginTop: 4 },
-  instCard: { borderRadius: 20, padding: 16, marginVertical: 6, borderWidth: 1, backgroundColor: theme.colors.surface, overflow: 'hidden' },
+  instCard: { borderRadius: 20, padding: 16, marginVertical: 6, borderWidth: 1, backgroundColor: colors.surface, overflow: 'hidden' },
   instTopRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   instIcon: { width: 42, height: 42, borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
   instName: { color: '#fff', fontSize: 14, fontWeight: '700' },
-  instSub: { color: theme.colors.textTertiary, fontSize: 11, marginTop: 2 },
+  instSub: { color: colors.textTertiary, fontSize: 11, marginTop: 2 },
   instAmt: { color: '#fff', fontSize: 14, fontWeight: '700' },
-  progressBar: { height: 6, borderRadius: 3, backgroundColor: theme.colors.surfaceElevated, marginTop: 12, overflow: 'hidden' },
+  progressBar: { height: 6, borderRadius: 3, backgroundColor: colors.surfaceElevated, marginTop: 12, overflow: 'hidden' },
   progressFill: { height: '100%', borderRadius: 3 },
   instBottomRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 },
-  instMeta: { color: theme.colors.textSecondary, fontSize: 11 },
-  hint: { color: theme.colors.textTertiary, fontSize: 10, textAlign: 'center', marginTop: 16 },
+  instMeta: { color: colors.textSecondary, fontSize: 11 },
+  hint: { color: colors.textTertiary, fontSize: 10, textAlign: 'center', marginTop: 16 },
   empty: { alignItems: 'center', paddingVertical: 60, gap: 6 },
   emptyTxt: { color: '#fff', fontSize: 15, fontWeight: '600', marginTop: 12 },
-  emptySub: { color: theme.colors.textTertiary, fontSize: 12, textAlign: 'center', paddingHorizontal: 40 },
+  emptySub: { color: colors.textTertiary, fontSize: 12, textAlign: 'center', paddingHorizontal: 40 },
   modalRoot: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
-  sheet: { backgroundColor: theme.colors.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 22, maxHeight: '90%' },
-  sheetHandle: { width: 44, height: 4, borderRadius: 2, backgroundColor: theme.colors.border, alignSelf: 'center', marginBottom: 14 },
+  sheet: { backgroundColor: colors.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 22, maxHeight: '90%' },
+  sheetHandle: { width: 44, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: 'center', marginBottom: 14 },
   sheetTitle: { color: '#fff', fontSize: 20, fontWeight: '700', marginBottom: 16 },
-  label: { color: theme.colors.textSecondary, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 12, marginBottom: 8 },
-  input: { backgroundColor: theme.colors.surfaceElevated, borderRadius: 14, paddingHorizontal: 14, height: 48, color: '#fff',
-    borderWidth: 1, borderColor: theme.colors.border, fontSize: 15 },
+  label: { color: colors.textSecondary, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 12, marginBottom: 8 },
+  input: { backgroundColor: colors.surfaceElevated, borderRadius: 14, paddingHorizontal: 14, height: 48, color: '#fff',
+    borderWidth: 1, borderColor: colors.border, fontSize: 15 },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceElevated },
-  chipActive: { backgroundColor: theme.colors.primary, borderColor: theme.colors.primary },
-  chipTxt: { color: theme.colors.textSecondary, fontSize: 12, fontWeight: '600' },
+  chip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceElevated },
+  chipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  chipTxt: { color: colors.textSecondary, fontSize: 12, fontWeight: '600' },
   colorDot: { width: 36, height: 36, borderRadius: 18, borderWidth: 2, borderColor: 'transparent' },
   colorActive: { borderColor: '#fff' },
-  saveBtn: { backgroundColor: theme.colors.primary, borderRadius: 999, height: 52, alignItems: 'center', justifyContent: 'center', marginTop: 20 },
+  saveBtn: { backgroundColor: colors.primary, borderRadius: 999, height: 52, alignItems: 'center', justifyContent: 'center', marginTop: 20 },
   saveTxt: { color: '#fff', fontWeight: '700', fontSize: 15 },
 });

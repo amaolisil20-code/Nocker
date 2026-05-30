@@ -7,7 +7,7 @@ import { useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api } from '../../src/api';
-import { theme } from '../../src/theme';
+import { useTheme } from '../../src/ThemeContext';
 import { SubHeader } from '../../src/components/SubHeader';
 
 const COLORS = ['#16A34A', '#3B82F6', '#8B5CF6', '#F59E0B', '#EC4899', '#EF4444', '#06B6D4', '#F97316'];
@@ -15,6 +15,8 @@ const ICONS = ['pricetag', 'fast-food', 'car', 'home', 'game-controller', 'medki
 
 export default function Categories() {
   const insets = useSafeAreaInsets();
+  const { colors } = useTheme();
+  const s = makeStyles(colors);
   const [items, setItems] = useState<any[]>([]);
   const [modal, setModal] = useState(false);
   const [name, setName] = useState('');
@@ -94,14 +96,14 @@ export default function Categories() {
             </View>
 
             <Text style={s.label}>Nome</Text>
-            <TextInput testID="cat-name" placeholder="Ex: Pet, Restaurantes..." placeholderTextColor={theme.colors.textTertiary}
+            <TextInput testID="cat-name" placeholder="Ex: Pet, Restaurantes..." placeholderTextColor={colors.textTertiary}
               value={name} onChangeText={setName} style={s.input} />
 
             <Text style={s.label}>Ícone</Text>
             <View style={s.iconGrid}>
               {ICONS.map(ic => (
                 <TouchableOpacity key={ic} style={[s.iconBtn, icon === ic && s.iconActive]} onPress={() => setIcon(ic)}>
-                  <Ionicons name={ic as any} size={20} color={icon === ic ? '#fff' : theme.colors.textSecondary} />
+                  <Ionicons name={ic as any} size={20} color={icon === ic ? '#fff' : colors.textSecondary} />
                 </TouchableOpacity>
               ))}
             </View>
@@ -123,32 +125,32 @@ export default function Categories() {
   );
 }
 
-const s = StyleSheet.create({
-  c: { flex: 1, backgroundColor: theme.colors.bg, paddingHorizontal: 20 },
-  section: { color: theme.colors.textTertiary, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.6, marginTop: 14, marginBottom: 10 },
+const makeStyles = (colors: any) => StyleSheet.create({
+  c: { flex: 1, backgroundColor: colors.bg, paddingHorizontal: 20 },
+  section: { color: colors.textTertiary, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.6, marginTop: 14, marginBottom: 10 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  catTile: { width: '22%', alignItems: 'center', padding: 10, backgroundColor: theme.colors.surface,
-    borderRadius: 16, borderWidth: 1, borderColor: theme.colors.border },
+  catTile: { width: '22%', alignItems: 'center', padding: 10, backgroundColor: colors.surface,
+    borderRadius: 16, borderWidth: 1, borderColor: colors.border },
   catIcon: { width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 1, marginBottom: 6 },
   catName: { color: '#fff', fontSize: 11, textAlign: 'center' },
-  hint: { color: theme.colors.textTertiary, fontSize: 10, textAlign: 'center', marginTop: 20 },
+  hint: { color: colors.textTertiary, fontSize: 10, textAlign: 'center', marginTop: 20 },
   modalRoot: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
-  sheet: { backgroundColor: theme.colors.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 22, maxHeight: '90%' },
-  sheetHandle: { width: 44, height: 4, borderRadius: 2, backgroundColor: theme.colors.border, alignSelf: 'center', marginBottom: 14 },
+  sheet: { backgroundColor: colors.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 22, maxHeight: '90%' },
+  sheetHandle: { width: 44, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: 'center', marginBottom: 14 },
   sheetTitle: { color: '#fff', fontSize: 20, fontWeight: '700', marginBottom: 16 },
-  typeBtn: { flex: 1, paddingVertical: 12, borderRadius: 12, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceElevated, alignItems: 'center' },
-  typeExpActive: { backgroundColor: theme.colors.expense, borderColor: theme.colors.expense },
-  typeIncActive: { backgroundColor: theme.colors.primary, borderColor: theme.colors.primary },
-  typeTxt: { color: theme.colors.textSecondary, fontWeight: '700' },
-  label: { color: theme.colors.textSecondary, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 14, marginBottom: 8 },
-  input: { backgroundColor: theme.colors.surfaceElevated, borderRadius: 14, paddingHorizontal: 14, height: 48, color: '#fff',
-    borderWidth: 1, borderColor: theme.colors.border, fontSize: 15 },
+  typeBtn: { flex: 1, paddingVertical: 12, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceElevated, alignItems: 'center' },
+  typeExpActive: { backgroundColor: colors.expense, borderColor: colors.expense },
+  typeIncActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  typeTxt: { color: colors.textSecondary, fontWeight: '700' },
+  label: { color: colors.textSecondary, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 14, marginBottom: 8 },
+  input: { backgroundColor: colors.surfaceElevated, borderRadius: 14, paddingHorizontal: 14, height: 48, color: '#fff',
+    borderWidth: 1, borderColor: colors.border, fontSize: 15 },
   iconGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  iconBtn: { width: 44, height: 44, borderRadius: 12, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceElevated, alignItems: 'center', justifyContent: 'center' },
-  iconActive: { backgroundColor: theme.colors.primary, borderColor: theme.colors.primary },
+  iconBtn: { width: 44, height: 44, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceElevated, alignItems: 'center', justifyContent: 'center' },
+  iconActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   colorRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   colorDot: { width: 36, height: 36, borderRadius: 18, borderWidth: 2, borderColor: 'transparent' },
   colorActive: { borderColor: '#fff' },
-  saveBtn: { backgroundColor: theme.colors.primary, borderRadius: 999, height: 52, alignItems: 'center', justifyContent: 'center', marginTop: 20 },
+  saveBtn: { backgroundColor: colors.primary, borderRadius: 999, height: 52, alignItems: 'center', justifyContent: 'center', marginTop: 20 },
   saveTxt: { color: '#fff', fontWeight: '700', fontSize: 15 },
 });

@@ -1,16 +1,89 @@
 import React from 'react';
 import { View } from 'react-native';
 import Svg, { Path, Defs, LinearGradient, Stop, Circle, G } from 'react-native-svg';
-import { theme } from '../theme';
+import { useTheme } from '../ThemeContext';
 
 type LineProps = {
   data: number[];
   width: number;
   height: number;
   stroke?: string;
+  // Nova prop: dados de duas séries independentes
+  incomeData?: number[];
+  expenseData?: number[];
 };
 
-export const LineChart: React.FC<LineProps> = ({ data, width, height, stroke = theme.colors.primary }) => {
+export const LineChart: React.FC<LineProps> = ({ data, width, height, stroke, incomeData, expenseData }) => {
+  const { colors } = useTheme();
+
+  // Modo dual: duas linhas (entrada verde + saída vermelha)
+  if (incomeData && expenseData) {
+    const allValues = [...incomeData, ...expenseData, 0];
+    const max = Math.max(...allValues, 1);
+    const min = Math.min(...allValues, 0);
+    const range = max - min || 1;
+    const pad = 8;
+    const len = Math.max(incomeData.length, expenseData.length);
+    const stepX = (width - pad * 2) / Math.max(len - 1, 1);
+
+    const toPoints = (arr: number[]) =>
+      arr.map((v, i) => ({
+        x: pad + i * stepX,
+        y: pad + (1 - (v - min) / range) * (height - pad * 2),
+      }));
+
+    const buildPath = (pts: { x: number; y: number }[]) =>
+      pts.reduce((acc, p, i, arr) => {
+        if (i === 0) return `M ${p.x} ${p.y}`;
+        const prev = arr[i - 1];
+        const cx = (prev.x + p.x) / 2;
+        return `${acc} C ${cx} ${prev.y}, ${cx} ${p.y}, ${p.x} ${p.y}`;
+      }, '');
+
+    const buildArea = (pts: { x: number; y: number }[], path: string) =>
+      `${path} L ${pts[pts.length - 1].x} ${height - pad} L ${pts[0].x} ${height - pad} Z`;
+
+    const incPts = toPoints(incomeData);
+    const expPts = toPoints(expenseData);
+    const incPath = buildPath(incPts);
+    const expPath = buildPath(expPts);
+    const incArea = buildArea(incPts, incPath);
+    const expArea = buildArea(expPts, expPath);
+
+    return (
+      <Svg width={width} height={height}>
+        <Defs>
+          <LinearGradient id="lgInc" x1="0" y1="0" x2="0" y2="1">
+            <Stop offset="0" stopColor={colors.primary} stopOpacity="0.3" />
+            <Stop offset="1" stopColor={colors.primary} stopOpacity="0" />
+          </LinearGradient>
+          <LinearGradient id="lgExp" x1="0" y1="0" x2="0" y2="1">
+            <Stop offset="0" stopColor={colors.expense} stopOpacity="0.25" />
+            <Stop offset="1" stopColor={colors.expense} stopOpacity="0" />
+          </LinearGradient>
+        </Defs>
+
+        {/* Áreas preenchidas */}
+        <Path d={expArea} fill="url(#lgExp)" />
+        <Path d={incArea} fill="url(#lgInc)" />
+
+        {/* Linha de saída (vermelha) */}
+        <Path d={expPath} stroke={colors.expense} strokeWidth={2.5} fill="none" strokeLinecap="round" />
+        {expPts.map((p, i) => (
+          <Circle key={`e${i}`} cx={p.x} cy={p.y} r={i === expPts.length - 1 ? 4 : 0} fill={colors.expense} />
+        ))}
+
+        {/* Linha de entrada (verde) — renderizada por cima */}
+        <Path d={incPath} stroke={colors.primary} strokeWidth={2.5} fill="none" strokeLinecap="round" />
+        {incPts.map((p, i) => (
+          <Circle key={`i${i}`} cx={p.x} cy={p.y} r={i === incPts.length - 1 ? 4 : 0} fill={colors.primary} />
+        ))}
+      </Svg>
+    );
+  }
+
+  // Modo legado: linha única (compatibilidade com código antigo)
+  const activeStroke = stroke || colors.primary;
   if (!data.length) return <View style={{ width, height }} />;
   const max = Math.max(...data, 1);
   const min = Math.min(...data, 0);
@@ -22,7 +95,6 @@ export const LineChart: React.FC<LineProps> = ({ data, width, height, stroke = t
     const y = pad + (1 - (v - min) / range) * (height - pad * 2);
     return { x, y };
   });
-  // smooth curve
   const path = points.reduce((acc, p, i, arr) => {
     if (i === 0) return `M ${p.x} ${p.y}`;
     const prev = arr[i - 1];
@@ -35,14 +107,14 @@ export const LineChart: React.FC<LineProps> = ({ data, width, height, stroke = t
     <Svg width={width} height={height}>
       <Defs>
         <LinearGradient id="lg" x1="0" y1="0" x2="0" y2="1">
-          <Stop offset="0" stopColor={stroke} stopOpacity="0.35" />
-          <Stop offset="1" stopColor={stroke} stopOpacity="0" />
+          <Stop offset="0" stopColor={activeStroke} stopOpacity="0.35" />
+          <Stop offset="1" stopColor={activeStroke} stopOpacity="0" />
         </LinearGradient>
       </Defs>
       <Path d={areaPath} fill="url(#lg)" />
-      <Path d={path} stroke={stroke} strokeWidth={2.5} fill="none" strokeLinecap="round" />
+      <Path d={path} stroke={activeStroke} strokeWidth={2.5} fill="none" strokeLinecap="round" />
       {points.map((p, i) => (
-        <Circle key={i} cx={p.x} cy={p.y} r={i === points.length - 1 ? 4 : 0} fill={stroke} />
+        <Circle key={i} cx={p.x} cy={p.y} r={i === points.length - 1 ? 4 : 0} fill={activeStroke} />
       ))}
     </Svg>
   );
@@ -52,6 +124,7 @@ type DonutSlice = { value: number; color: string };
 type DonutProps = { slices: DonutSlice[]; size: number; thickness?: number; children?: React.ReactNode };
 
 export const DonutChart: React.FC<DonutProps> = ({ slices, size, thickness = 18, children }) => {
+  const { colors } = useTheme();
   const total = slices.reduce((s, x) => s + x.value, 0) || 1;
   const radius = size / 2 - thickness / 2;
   const cx = size / 2;
@@ -74,7 +147,7 @@ export const DonutChart: React.FC<DonutProps> = ({ slices, size, thickness = 18,
     <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
       <Svg width={size} height={size} style={{ position: 'absolute' }}>
         <G>
-          <Circle cx={cx} cy={cy} r={radius} stroke={theme.colors.surfaceElevated} strokeWidth={thickness} fill="none" />
+          <Circle cx={cx} cy={cy} r={radius} stroke={colors.surfaceElevated} strokeWidth={thickness} fill="none" />
           {paths}
         </G>
       </Svg>
@@ -85,6 +158,7 @@ export const DonutChart: React.FC<DonutProps> = ({ slices, size, thickness = 18,
 
 type BarProps = { values: { income: number; expense: number; label: string }[]; width: number; height: number };
 export const BarsChart: React.FC<BarProps> = ({ values, width, height }) => {
+  const { colors } = useTheme();
   if (!values.length) return null;
   const max = Math.max(...values.flatMap(v => [v.income, v.expense]), 1);
   const pad = 8;
@@ -98,8 +172,8 @@ export const BarsChart: React.FC<BarProps> = ({ values, width, height }) => {
         const he = (v.expense / max) * (height - pad * 2);
         return (
           <G key={i}>
-            <Path d={`M ${xBase} ${height - pad - hi} h ${barW} v ${hi} h -${barW} Z`} fill={theme.colors.primary} opacity={0.95} />
-            <Path d={`M ${xBase + barW + 2} ${height - pad - he} h ${barW} v ${he} h -${barW} Z`} fill={theme.colors.expense} opacity={0.85} />
+            <Path d={`M ${xBase} ${height - pad - hi} h ${barW} v ${hi} h -${barW} Z`} fill={colors.primary} opacity={0.95} />
+            <Path d={`M ${xBase + barW + 2} ${height - pad - he} h ${barW} v ${he} h -${barW} Z`} fill={colors.expense} opacity={0.85} />
           </G>
         );
       })}

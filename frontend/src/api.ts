@@ -31,11 +31,15 @@ export const api = {
   login: (email: string, password: string) =>
     request('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
   me: () => request('/auth/me'),
+  updateProfile: (data: { name?: string; username?: string; phone?: string; birth_date?: string; avatar_url?: string }) =>
+    request('/auth/profile', { method: 'PATCH', body: JSON.stringify(data) }),
 
   // transactions
   listTransactions: () => request('/transactions'),
   createTransaction: (data: any) =>
     request('/transactions', { method: 'POST', body: JSON.stringify(data) }),
+  updateTransaction: (id: string, data: any) =>
+    request(`/transactions/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteTransaction: (id: string) =>
     request(`/transactions/${id}`, { method: 'DELETE' }),
 
@@ -97,6 +101,23 @@ export const api = {
   chat: (message: string, session_id?: string) =>
     request('/chat', { method: 'POST', body: JSON.stringify({ message, session_id }) }),
   chatHistory: (session_id: string) => request(`/chat/history/${session_id}`),
+
+  // financial settings
+  getFinancialSettings: () => request('/financial-settings'),
+  updateFinancialSettings: (data: { monthly_income?: number; monthly_limit?: number }) =>
+    request('/financial-settings', { method: 'PATCH', body: JSON.stringify(data) }),
+
+  // category limits (usa as categorias já criadas pelo usuário)
+  listCategoryLimits: () => request('/category-limits'),
+  upsertCategoryLimit: (data: { category_name: string; monthly_limit: number; color?: string }) =>
+    request('/category-limits', { method: 'POST', body: JSON.stringify(data) }),
+  deleteCategoryLimit: (id: string) =>
+    request(`/category-limits/${id}`, { method: 'DELETE' }),
+
+  // spending alerts
+  listSpendingAlerts: () => request('/spending-alerts'),
+  upsertSpendingAlert: (data: { type: string; threshold_pct: number; active: boolean }) =>
+    request('/spending-alerts', { method: 'PUT', body: JSON.stringify(data) }),
 };
 
 export async function setToken(token: string) {
