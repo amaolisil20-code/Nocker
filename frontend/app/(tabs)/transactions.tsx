@@ -10,14 +10,13 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { api } from '../../src/api';
 import { useTheme } from '../../src/ThemeContext';
 
-const CATEGORIES = ['Alimentação', 'Transporte', 'Moradia', 'Lazer', 'Saúde', 'Educação', 'Compras', 'Salário', 'Investimentos', 'Outros'];
-
 export default function Transactions() {
   const insets = useSafeAreaInsets();
   const { colors, t } = useTheme();
   const s = makeStyles(colors);
   const params = useLocalSearchParams<{ open?: string }>();
   const [items, setItems] = useState<any[]>([]);
+  const [categories, setCategories] = useState<any[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState<'all' | 'income' | 'expense'>('all');
   const [search, setSearch] = useState('');
@@ -27,7 +26,7 @@ export default function Transactions() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [type, setType] = useState<'income' | 'expense'>('expense');
   const [amount, setAmount] = useState('');
-  const [category, setCategory] = useState('Outros');
+  const [category, setCategory] = useState('');
   const [description, setDescription] = useState('');
   const [saving, setSaving] = useState(false);
   const [date, setDate] = useState(new Date());
@@ -41,8 +40,14 @@ export default function Transactions() {
     new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
 
   const load = async () => {
-    try { setItems(await api.listTransactions()); } catch { /* ignore */ }
+    try {
+      const [txs, cats] = await Promise.all([api.listTransactions(), api.listCategories()]);
+      setItems(txs);
+      setCategories(cats);
+    } catch { /* ignore */ }
   };
+
+  const availableCategories = categories.filter(c => c.type === type).map(c => c.name);
 
   useFocusEffect(useCallback(() => { load(); }, []));
 
@@ -65,7 +70,7 @@ export default function Transactions() {
     setType(t_type);
     setAmount('');
     setDescription('');
-    setCategory('Outros');
+    setCategory('');
     setDate(new Date());
     setModal(true);
   };
@@ -86,6 +91,7 @@ export default function Transactions() {
     const v = parseFloat(amount.replace(',', '.'));
     if (!v || v <= 0) return Alert.alert('Atenção', 'Informe um valor válido');
     if (!description.trim()) return Alert.alert('Atenção', 'Informe uma descrição');
+    if (!category) return Alert.alert('Atenção', 'Selecione uma categoria. Crie categorias na aba Categorias.');
     setSaving(true);
     try {
       const iso = date.toISOString().split('T')[0];
@@ -248,11 +254,11 @@ export default function Transactions() {
             <Text style={s.sheetTitle}>{editingId ? 'Editar transação' : 'Nova transação'}</Text>
 
             <View style={s.typeRow}>
-              <TouchableOpacity testID="type-expense" style={[s.typeBtn, type === 'expense' && s.typeBtnActiveExp]} onPress={() => setType('expense')}>
+              <TouchableOpacity testID="type-expense" style={[s.typeBtn, type === 'expense' && s.typeBtnActiveExp]} onPress={() => { setType('expense'); setCategory(''); }}>
                 <Ionicons name="arrow-up" size={16} color={type === 'expense' ? '#fff' : colors.expense} />
                 <Text style={[s.typeBtnTxt, type === 'expense' && { color: '#fff' }]}>{t.exits}</Text>
               </TouchableOpacity>
-              <TouchableOpacity testID="type-income" style={[s.typeBtn, type === 'income' && s.typeBtnActiveInc]} onPress={() => setType('income')}>
+              <TouchableOpacity testID="type-income" style={[s.typeBtn, type === 'income' && s.typeBtnActiveInc]} onPress={() => { setType('income'); setCategory(''); }}>
                 <Ionicons name="arrow-down" size={16} color={type === 'income' ? '#fff' : colors.primary} />
                 <Text style={[s.typeBtnTxt, type === 'income' && { color: '#fff' }]}>{t.entries}</Text>
               </TouchableOpacity>
@@ -291,13 +297,17 @@ export default function Transactions() {
             )}
 
             <Text style={s.label}>Categoria</Text>
-            <View style={s.catGrid}>
-              {CATEGORIES.map(c => (
-                <TouchableOpacity key={c} style={[s.catChip, category === c && s.catChipActive]} onPress={() => setCategory(c)}>
-                  <Text style={[s.catChipTxt, category === c && { color: '#fff' }]}>{c}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+            {availableCategories.length === 0 ? (
+              <Text style={s.noCatHint}>Nenhuma categoria de {type === 'expense' ? 'despesa' : 'receita'}. Crie na aba Categorias.</Text>
+            ) : (
+              <View style={s.catGrid}>
+                {availableCategories.map(c => (
+                  <TouchableOpacity key={c} style={[s.catChip, category === c && s.catChipActive]} onPress={() => setCategory(c)}>
+                    <Text style={[s.catChipTxt, category === c && { color: '#fff' }]}>{c}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
 
             <TouchableOpacity testID="save-tx" style={s.saveBtn} onPress={save} disabled={saving}>
               <Text style={s.saveTxt}>{saving ? t.loading : (editingId ? 'Salvar alterações' : t.save)}</Text>
@@ -384,6 +394,7 @@ const makeStyles = (colors: any) => StyleSheet.create({
     borderColor: colors.border, backgroundColor: colors.surfaceElevated },
   catChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   catChipTxt: { color: colors.textSecondary, fontSize: 12, fontWeight: '600' },
+  noCatHint: { color: colors.textTertiary, fontSize: 12, lineHeight: 18, marginBottom: 8 },
   saveBtn: { backgroundColor: colors.primary, borderRadius: 999, height: 52, alignItems: 'center', justifyContent: 'center', marginTop: 20 },
   saveTxt: { color: '#fff', fontWeight: '700', fontSize: 15 },
   cancelEditBtn: { borderRadius: 999, height: 48, alignItems: 'center', justifyContent: 'center', marginTop: 10,

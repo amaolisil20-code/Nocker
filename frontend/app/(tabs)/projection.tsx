@@ -106,11 +106,11 @@ export default function Projection() {
 
             <View style={s.breakdown}>
               <Text style={s.breakdownTitle}>Compromissos mensais</Text>
-              <BreakdownRow icon="calendar" color={colors.expense} label="Gastos fixos" value={data.fixed_total} />
-              <BreakdownRow icon="repeat" color="#8B5CF6" label="Assinaturas" value={data.subscriptions_monthly} />
-              <BreakdownRow icon="layers" color="#3B82F6" label="Parcelados" value={data.installments_monthly} />
+              <BreakdownRow styles={s} icon="calendar" color={colors.expense} label="Gastos fixos" value={data.fixed_total} />
+              <BreakdownRow styles={s} icon="repeat" color="#8B5CF6" label="Assinaturas" value={data.subscriptions_monthly} />
+              <BreakdownRow styles={s} icon="layers" color="#3B82F6" label="Parcelados" value={data.installments_monthly} />
               <View style={s.divider} />
-              <BreakdownRow icon="receipt" color={colors.textSecondary} label="Total comprometido"
+              <BreakdownRow styles={s} icon="receipt" color={colors.textSecondary} label="Total comprometido"
                 value={data.fixed_total + data.subscriptions_monthly + data.installments_monthly} bold />
             </View>
 
@@ -131,14 +131,14 @@ export default function Projection() {
   );
 }
 
-function BreakdownRow({ icon, color, label, value, bold }: any) {
+function BreakdownRow({ styles, icon, color, label, value, bold }: any) {
   return (
-    <View style={s.bRow}>
-      <View style={[s.bIcon, { backgroundColor: `${color}22` }]}>
+    <View style={styles.bRow}>
+      <View style={[styles.bIcon, { backgroundColor: `${color}22` }]}>
         <Ionicons name={icon} size={14} color={color} />
       </View>
-      <Text style={[s.bLabel, bold && { color: '#fff', fontWeight: '700' }]}>{label}</Text>
-      <Text style={[s.bVal, bold && { fontWeight: '800' }]}>{fmtBRL(value)}</Text>
+      <Text style={[styles.bLabel, bold && { color: '#fff', fontWeight: '700' }]}>{label}</Text>
+      <Text style={[styles.bVal, bold && { fontWeight: '800' }]}>{fmtBRL(value)}</Text>
     </View>
   );
 }

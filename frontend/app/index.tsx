@@ -1,20 +1,16 @@
-import { useEffect } from 'react';
 import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
-import { useRouter } from 'expo-router';
+import { Redirect } from 'expo-router';
 import { useAuth } from '../src/AuthContext';
 import { useTheme } from '../src/ThemeContext';
 
 export default function Index() {
-  const router = useRouter();
   const { user, loading } = useAuth();
   const { colors } = useTheme();
 
-  useEffect(() => {
-    if (!loading) {
-      if (user) router.replace('/(tabs)/dashboard');
-      else router.replace('/login');
-    }
-  }, [user, loading]);
+  if (!loading) {
+    if (user) return <Redirect href="/(tabs)/dashboard" />;
+    return <Redirect href="/login" />;
+  }
 
   return (
     <View style={[styles.c, { backgroundColor: colors.bg }]}>

@@ -13,7 +13,17 @@ async function request(path: string, opts: RequestInit = {}) {
     ...(await authHeader()),
     ...(opts.headers || {}),
   };
-  const res = await fetch(`${BASE}/api${path}`, { ...opts, headers });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}/api${path}`, { ...opts, headers, signal: controller.signal });
+  } catch (e: any) {
+    if (e?.name === 'AbortError') throw new Error('Servidor indisponível. Verifique se o backend está rodando.');
+    throw e;
+  } finally {
+    clearTimeout(timeout);
+  }
   const text = await res.text();
   let data: any = null;
   try { data = text ? JSON.parse(text) : null; } catch { data = text; }
@@ -33,6 +43,45 @@ export const api = {
   me: () => request('/auth/me'),
   updateProfile: (data: { name?: string; username?: string; phone?: string; birth_date?: string; avatar_url?: string }) =>
     request('/auth/profile', { method: 'PATCH', body: JSON.stringify(data) }),
+  changePassword: (current_password: string, new_password: string) =>
+    request('/auth/password', { method: 'PATCH', body: JSON.stringify({ current_password, new_password }) }),
+  deleteAccount: (password: string) =>
+    request('/auth/account', { method: 'DELETE', body: JSON.stringify({ password }) }),
+
+  uploadAvatar: async (uri: string) => {
+    const token = await getToken();
+    const filename = uri.split('/').pop() || 'avatar.jpg';
+    const ext = filename.includes('.') ? filename.split('.').pop()?.toLowerCase() : 'jpg';
+    const type = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+    const formData = new FormData();
+    formData.append('file', { uri, name: filename.includes('.') ? filename : 'avatar.jpg', type } as any);
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000);
+    let res: Response;
+    try {
+      res = await fetch(`${BASE}/api/auth/avatar/upload`, {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: formData,
+        signal: controller.signal,
+      });
+    } catch (e: any) {
+      if (e?.name === 'AbortError') throw new Error('Tempo esgotado ao enviar a foto.');
+      throw e;
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    const text = await res.text();
+    let data: any = null;
+    try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+    if (!res.ok) {
+      const msg = (data && data.detail) || res.statusText || 'Erro ao enviar foto';
+      throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+    }
+    return data;
+  },
 
   // transactions
   listTransactions: () => request('/transactions'),
@@ -98,8 +147,16 @@ export const api = {
   dashboard: () => request('/dashboard/summary'),
 
   // chat
-  chat: (message: string, session_id?: string) =>
-    request('/chat', { method: 'POST', body: JSON.stringify({ message, session_id }) }),
+  chat: (message: string, session_id?: string, opts?: { tone?: string; personality?: string }) =>
+    request('/chat', {
+      method: 'POST',
+      body: JSON.stringify({
+        message,
+        session_id,
+        tone: opts?.tone,
+        personality: opts?.personality,
+      }),
+    }),
   chatHistory: (session_id: string) => request(`/chat/history/${session_id}`),
 
   // financial settings

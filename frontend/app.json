@@ -36,7 +36,14 @@
           "backgroundColor": "#000"
         }
       ],
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Permita acesso às fotos para alterar sua foto de perfil.",
+          "cameraPermission": "Permita acesso à câmera para tirar sua foto de perfil."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

@@ -7,6 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api } from '../../src/api';
+import { getAiSettings } from '../../src/aiSettings';
 import { useTheme } from '../../src/ThemeContext';
 
 type Msg = { role: 'user' | 'assistant'; content: string; pending?: boolean };
@@ -27,6 +28,11 @@ export default function Chat() {
   const [sessionId, setSessionId] = useState<string | undefined>();
   const [sending, setSending] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
+  const aiSettingsRef = useRef<Awaited<ReturnType<typeof getAiSettings>> | null>(null);
+
+  useEffect(() => {
+    getAiSettings().then(s => { aiSettingsRef.current = s; });
+  }, []);
 
   useEffect(() => {
     setMessages([{
@@ -43,7 +49,23 @@ export default function Chat() {
     setSending(true);
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
     try {
-      const r = await api.chat(content, sessionId);
+      const ai = aiSettingsRef.current || await getAiSettings();
+      aiSettingsRef.current = ai;
+      if (!ai.financialChatEnabled) {
+        setMessages(m => {
+          const copy = [...m];
+          copy[copy.length - 1] = {
+            role: 'assistant',
+            content: 'O chat financeiro está desativado. Ative em Configurações → IA / Assistente → Chat.',
+          };
+          return copy;
+        });
+        return;
+      }
+      const r = await api.chat(content, sessionId, {
+        tone: ai.tone,
+        personality: ai.personality || undefined,
+      });
       setSessionId(r.session_id);
       setMessages(m => {
         const copy = [...m];

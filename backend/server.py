@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, status
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, File, UploadFile
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -59,6 +59,13 @@ class UserUpdate(BaseModel):
     phone: Optional[str] = None
     birth_date: Optional[str] = None
     avatar_url: Optional[str] = None
+
+class PasswordChange(BaseModel):
+    current_password: str
+    new_password: str
+
+class AccountDelete(BaseModel):
+    password: str
 
 class AuthResponse(BaseModel):
     token: str
@@ -132,6 +139,8 @@ class GoalUpdate(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
+    tone: Optional[Literal['motivador', 'rigido', 'engracado']] = None
+    personality: Optional[str] = None
 
 class ChatResponse(BaseModel):
     session_id: str
@@ -341,6 +350,70 @@ async def update_profile(payload: UserUpdate, current=Depends(get_current_user))
         raise HTTPException(status_code=400, detail="Nenhum campo para atualizar")
     update_data['updated_at'] = datetime.now(timezone.utc).isoformat()
     response = supabase.table('users').update(update_data).eq('id', current['id']).execute()
+    if not response.data:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado")
+    return user_to_out(response.data[0])
+
+@api_router.patch("/auth/password", response_model=UserOut)
+async def change_password(payload: PasswordChange, current=Depends(get_current_user)):
+    if not verify_password(payload.current_password, current['password']):
+        raise HTTPException(status_code=400, detail="Senha atual incorreta")
+    if len(payload.new_password) < 6:
+        raise HTTPException(status_code=400, detail="A nova senha deve ter ao menos 6 caracteres")
+    response = supabase.table('users').update({
+        'password': hash_password(payload.new_password),
+        'updated_at': datetime.now(timezone.utc).isoformat(),
+    }).eq('id', current['id']).select('*').execute()
+    if not response.data:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado")
+    return user_to_out(response.data[0])
+
+@api_router.delete("/auth/account")
+async def delete_account(payload: AccountDelete, current=Depends(get_current_user)):
+    if not verify_password(payload.password, current['password']):
+        raise HTTPException(status_code=400, detail="Senha incorreta")
+    user_id = current['id']
+    for table in (
+        'chat_messages', 'spending_alerts', 'category_limits', 'financial_settings',
+        'categories', 'subscriptions', 'installments', 'fixed_expenses', 'goals', 'cards', 'transactions',
+    ):
+        supabase.table(table).delete().eq('user_id', user_id).execute()
+    supabase.table('users').delete().eq('id', user_id).execute()
+    return {"ok": True}
+
+@api_router.post("/auth/avatar/upload", response_model=UserOut)
+async def upload_avatar(file: UploadFile = File(...), current=Depends(get_current_user)):
+    allowed = {"image/jpeg", "image/png", "image/webp", "image/jpg"}
+    content_type = file.content_type or "image/jpeg"
+    if content_type not in allowed:
+        raise HTTPException(status_code=400, detail="Formato não suportado. Use JPG ou PNG.")
+
+    content = await file.read()
+    if len(content) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Imagem muito grande (máx. 5MB).")
+
+    ext = "jpg" if "jpeg" in content_type or content_type == "image/jpg" else "png" if content_type == "image/png" else "webp"
+    path = f"{current['id']}/avatar.{ext}"
+
+    try:
+        supabase.storage.from_("avatars").upload(
+            path,
+            content,
+            file_options={"content-type": content_type, "upsert": "true"},
+        )
+        avatar_url = supabase.storage.from_("avatars").get_public_url(path)
+    except Exception as storage_err:
+        logging.warning("Avatar storage upload failed, saving inline: %s", storage_err)
+        import base64
+        if len(content) > 500_000:
+            raise HTTPException(status_code=400, detail="Imagem muito grande. Escolha uma foto menor.")
+        b64 = base64.b64encode(content).decode()
+        avatar_url = f"data:{content_type};base64,{b64}"
+
+    response = supabase.table("users").update({
+        "avatar_url": avatar_url,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }).eq("id", current["id"]).execute()
     if not response.data:
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
     return user_to_out(response.data[0])
@@ -619,18 +692,6 @@ async def delete_subscription(sub_id: str, current=Depends(get_current_user)):
     return {"ok": True}
 
 # ---------- CATEGORIES ----------
-DEFAULT_CATEGORIES = [
-    {"name": "Alimentação", "type": "expense", "color": "#F59E0B", "icon": "fast-food"},
-    {"name": "Transporte", "type": "expense", "color": "#3B82F6", "icon": "car"},
-    {"name": "Moradia", "type": "expense", "color": "#8B5CF6", "icon": "home"},
-    {"name": "Lazer", "type": "expense", "color": "#EC4899", "icon": "game-controller"},
-    {"name": "Saúde", "type": "expense", "color": "#EF4444", "icon": "medkit"},
-    {"name": "Educação", "type": "expense", "color": "#06B6D4", "icon": "school"},
-    {"name": "Compras", "type": "expense", "color": "#F97316", "icon": "bag"},
-    {"name": "Outros", "type": "expense", "color": "#737373", "icon": "ellipsis-horizontal"},
-    {"name": "Salário", "type": "income", "color": "#16A34A", "icon": "cash"},
-    {"name": "Investimentos", "type": "income", "color": "#10B981", "icon": "trending-up"},
-]
 
 @api_router.post("/categories", response_model=CategoryOut)
 async def create_category(payload: CategoryCreate, current=Depends(get_current_user)):
@@ -648,18 +709,8 @@ async def create_category(payload: CategoryCreate, current=Depends(get_current_u
 
 @api_router.get("/categories", response_model=List[CategoryOut])
 async def list_categories(current=Depends(get_current_user)):
-    response = supabase.table('categories').select('*').eq('user_id', current['id']).order('created_at', asc=True).limit(200).execute()
-    items = response.data
-    if not items:
-        # seed defaults for new user
-        now = datetime.now(timezone.utc).isoformat()
-        seeds = [
-            {**c, "id": str(uuid.uuid4()), "user_id": current['id'], "created_at": now}
-            for c in DEFAULT_CATEGORIES
-        ]
-        supabase.table('categories').insert(seeds).execute()
-        items = seeds
-    return [CategoryOut(**i) for i in items]
+    response = supabase.table('categories').select('*').eq('user_id', current['id']).order('created_at', desc=False).limit(200).execute()
+    return [CategoryOut(**i) for i in response.data]
 
 @api_router.delete("/categories/{cat_id}")
 async def delete_category(cat_id: str, current=Depends(get_current_user)):
@@ -839,6 +890,30 @@ async def projection(months: int = 6, current=Depends(get_current_user)):
     }
 
 # ---------- CHAT (Nocker AI) ----------
+
+def _tone_instruction(tone: Optional[str]) -> str:
+    tones = {
+        'motivador': (
+            'Tom motivador: seja encorajador, celebre pequenas vitórias e motive o usuário '
+            'a continuar melhorando suas finanças. Use emojis com moderação.'
+        ),
+        'rigido': (
+            'Tom rígido: seja direto, objetivo e firme. Foque em disciplina financeira, '
+            'metas claras e ações práticas. Evite rodeios e excesso de emojis.'
+        ),
+        'engracado': (
+            'Tom engraçado: use humor leve e descontraído, com emojis moderados, '
+            'mantendo conselhos financeiros úteis e precisos.'
+        ),
+    }
+    return tones.get(tone or 'motivador', tones['motivador']) + '\n\n'
+
+def _personality_instruction(personality: str) -> str:
+    text = personality.strip()
+    if not text:
+        return ''
+    return f'Personalidade adicional definida pelo usuário: {text}\n\n'
+
 @api_router.post("/chat", response_model=ChatResponse)
 async def chat(payload: ChatRequest, current=Depends(get_current_user)):
     if not EMERGENT_LLM_KEY:
@@ -863,10 +938,11 @@ async def chat(payload: ChatRequest, current=Depends(get_current_user)):
     system_message = (
         "Você é a Nocker IA, assistente financeira pessoal premium do app Nocker. "
         "Seu papel é ajudar o usuário a entender seus gastos, sugerir economia, "
-        "criar metas e dar insights inteligentes. Responda sempre em português brasileiro, "
-        "de forma amigável, moderna e direta. Use no máximo 4 parágrafos curtos. "
-        "Use emojis com moderação. Seja sempre encorajador e prático.\n\n"
-        f"Contexto financeiro do usuário ({current['name']}):\n" + "\n".join(context_lines)
+        "criar metas e dar insights inteligentes. Responda sempre em português brasileiro. "
+        "Use no máximo 4 parágrafos curtos.\n\n"
+        + _tone_instruction(payload.tone)
+        + (_personality_instruction(payload.personality) if payload.personality else "")
+        + f"\nContexto financeiro do usuário ({current['name']}):\n" + "\n".join(context_lines)
     )
 
     # load history from db (last 20 messages)
