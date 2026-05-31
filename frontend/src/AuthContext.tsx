@@ -30,16 +30,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     (async () => {
-      const t = await getToken();
-      if (t) {
-        try {
-          const u = await api.me();
-          setUser(u);
-        } catch {
-          await clearToken();
+      try {
+        const t = await getToken();
+        if (t) {
+          try {
+            const u = await api.me();
+            setUser(u);
+          } catch {
+            await clearToken();
+          }
         }
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     })();
   }, []);
 

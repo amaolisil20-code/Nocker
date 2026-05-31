@@ -1,6 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import {
-  View, Text, ScrollView, StyleSheet, TouchableOpacity, RefreshControl, ActivityIndicator, Dimensions,
+  View, Text, ScrollView, StyleSheet, TouchableOpacity, RefreshControl, ActivityIndicator, Dimensions, Modal, Image,
 } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -10,6 +10,13 @@ import { api } from '../../src/api';
 import { useAuth } from '../../src/AuthContext';
 import { useTheme } from '../../src/ThemeContext';
 import { LineChart, DonutChart } from '../../src/components/charts';
+import {
+  AppNotification,
+  buildFinancialNotifications,
+  countUnread,
+  getReadNotificationIds,
+  markNotificationsRead,
+} from '../../src/notifications';
 
 const PALETTE = ['#16A34A', '#22D3EE', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899'];
 const W = Dimensions.get('window').width;
@@ -174,16 +181,60 @@ export default function Dashboard() {
   const [hideBalance, setHideBalance] = useState(false);
   const [period, setPeriod] = useState<Period>('month');
   const [offset, setOffset] = useState(0);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [notifModal, setNotifModal] = useState(false);
 
   const fmtBRL = (v: number) =>
     new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
+
+  const loadNotifications = async (dashboardData: any, txs: any[]) => {
+    try {
+      const [settings, limits, alerts] = await Promise.all([
+        api.getFinancialSettings(),
+        api.listCategoryLimits(),
+        api.listSpendingAlerts(),
+      ]);
+      const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+      const categorySpending: Record<string, number> = {};
+      for (const tx of txs) {
+        if (tx.type !== 'expense') continue;
+        if (new Date(tx.date) >= monthStart) {
+          categorySpending[tx.category] = (categorySpending[tx.category] || 0) + tx.amount;
+        }
+      }
+      const built = buildFinancialNotifications({
+        monthExpense: dashboardData?.month_expense || 0,
+        monthIncome: dashboardData?.month_income || 0,
+        settings,
+        categoryLimits: limits,
+        categorySpending,
+        alerts,
+      });
+      const readIds = await getReadNotificationIds();
+      setNotifications(built);
+      setUnreadCount(countUnread(built, readIds));
+    } catch {
+      setNotifications([]);
+      setUnreadCount(0);
+    }
+  };
 
   const load = async () => {
     try {
       const [d, txs] = await Promise.all([api.dashboard(), api.listTransactions()]);
       setData(d);
       setTransactions(txs);
+      await loadNotifications(d, txs);
     } catch (e) { /* ignore */ }
+  };
+
+  const openNotifications = async () => {
+    setNotifModal(true);
+    if (notifications.length > 0) {
+      await markNotificationsRead(notifications.map(n => n.id));
+      setUnreadCount(0);
+    }
   };
 
   useFocusEffect(useCallback(() => {
@@ -230,9 +281,23 @@ export default function Dashboard() {
             <Text style={s.greet}>Olá, {getGreeting()} 👋</Text>
             <Text testID="user-name" style={s.userName}>{user?.name?.split(' ')[0] || 'Bem-vindo'}</Text>
           </View>
-          <TouchableOpacity testID="open-settings" style={s.avatar} onPress={() => router.push('/(tabs)/settings')}>
-            <Text style={s.avatarTxt}>{user?.name?.[0]?.toUpperCase() || 'N'}</Text>
-          </TouchableOpacity>
+          <View style={s.headerActions}>
+            <TouchableOpacity testID="open-notifications" style={s.bellBtn} onPress={openNotifications} activeOpacity={0.8}>
+              <Ionicons name="notifications-outline" size={22} color={colors.text} />
+              {unreadCount > 0 && (
+                <View style={s.bellBadge}>
+                  <Text style={s.bellBadgeTxt}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity testID="open-settings" style={s.avatar} onPress={() => router.push('/(tabs)/settings')}>
+              {user?.avatar_url ? (
+                <Image source={{ uri: user.avatar_url }} style={s.avatarImg} />
+              ) : (
+                <Text style={s.avatarTxt}>{user?.name?.[0]?.toUpperCase() || 'N'}</Text>
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Balance Card */}
@@ -425,6 +490,57 @@ export default function Dashboard() {
           ))) : <Text style={s.emptyTxt}>{t.noTransactions}</Text>}
         </View>
       </ScrollView>
+
+      {/* Notificações */}
+      <Modal visible={notifModal} transparent animationType="slide" onRequestClose={() => setNotifModal(false)}>
+        <View style={s.notifRoot}>
+          <TouchableOpacity style={s.notifBackdrop} activeOpacity={1} onPress={() => setNotifModal(false)} />
+          <View style={[s.notifSheet, { paddingBottom: insets.bottom + 16 }]}>
+            <View style={s.notifHandle} />
+            <View style={s.notifHeader}>
+              <Text style={s.notifTitle}>Notificações</Text>
+              <TouchableOpacity onPress={() => setNotifModal(false)} style={s.notifClose}>
+                <Ionicons name="close" size={20} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            {notifications.length === 0 ? (
+              <View style={s.notifEmpty}>
+                <Ionicons name="notifications-off-outline" size={40} color={colors.textTertiary} />
+                <Text style={s.notifEmptyTxt}>Nenhum alerta no momento</Text>
+                <Text style={s.notifEmptySub}>
+                  Ative alertas em Configurações → Financeiro → Alertas para ser avisado sobre seus limites.
+                </Text>
+                <TouchableOpacity
+                  style={s.notifSettingsBtn}
+                  onPress={() => { setNotifModal(false); router.push('/(tabs)/settings'); }}
+                >
+                  <Text style={s.notifSettingsTxt}>Ir para configurações</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <ScrollView showsVerticalScrollIndicator={false}>
+                {notifications.map(n => {
+                  const color = n.severity === 'danger' ? colors.expense
+                    : n.severity === 'success' ? colors.primary
+                    : colors.warning;
+                  return (
+                    <View key={n.id} style={s.notifItem}>
+                      <View style={[s.notifIcon, { backgroundColor: `${color}22` }]}>
+                        <Ionicons name={n.icon} size={20} color={color} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={s.notifItemTitle}>{n.title}</Text>
+                        <Text style={s.notifItemMsg}>{n.message}</Text>
+                      </View>
+                    </View>
+                  );
+                })}
+              </ScrollView>
+            )}
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -450,10 +566,18 @@ const s_quick = StyleSheet.create({
 const makeStyles = (colors: any, themeMode: string) => StyleSheet.create({
   c: { flex: 1, backgroundColor: colors.bg, paddingHorizontal: 20 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  bellBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.surfaceElevated,
+    borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
+  bellBadge: { position: 'absolute', top: 6, right: 6, minWidth: 18, height: 18, borderRadius: 9,
+    backgroundColor: colors.expense, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4,
+    borderWidth: 2, borderColor: colors.bg },
+  bellBadgeTxt: { color: '#fff', fontSize: 10, fontWeight: '800' },
   greet: { color: colors.textSecondary, fontSize: 13 },
   userName: { color: colors.text, fontSize: 22, fontWeight: '700', letterSpacing: -0.5 },
   avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.surfaceElevated,
-    borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
+    borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  avatarImg: { width: 44, height: 44, borderRadius: 22 },
   avatarTxt: { color: colors.primary, fontWeight: '800', fontSize: 17 },
   balanceCard: { backgroundColor: colors.surface, borderRadius: 24, padding: 22,
     borderWidth: 1, borderColor: colors.border, overflow: 'hidden' },
@@ -516,4 +640,24 @@ const makeStyles = (colors: any, themeMode: string) => StyleSheet.create({
   txTitle: { color: colors.text, fontSize: 14, fontWeight: '600' },
   txSub: { color: colors.textTertiary, fontSize: 12, marginTop: 2 },
   txAmt: { fontSize: 14, fontWeight: '700' },
+  notifRoot: { flex: 1, justifyContent: 'flex-end' },
+  notifBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.55)' },
+  notifSheet: { backgroundColor: colors.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28,
+    paddingHorizontal: 20, paddingTop: 12, maxHeight: '70%' },
+  notifHandle: { width: 44, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: 'center', marginBottom: 14 },
+  notifHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
+  notifTitle: { color: colors.text, fontSize: 20, fontWeight: '700' },
+  notifClose: { width: 34, height: 34, borderRadius: 17, backgroundColor: colors.surfaceElevated,
+    alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.border },
+  notifEmpty: { alignItems: 'center', paddingVertical: 32, paddingHorizontal: 12, gap: 8 },
+  notifEmptyTxt: { color: colors.text, fontSize: 16, fontWeight: '600', marginTop: 8 },
+  notifEmptySub: { color: colors.textSecondary, fontSize: 13, textAlign: 'center', lineHeight: 20 },
+  notifSettingsBtn: { marginTop: 12, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 999,
+    borderWidth: 1, borderColor: colors.primary },
+  notifSettingsTxt: { color: colors.primary, fontWeight: '700', fontSize: 14 },
+  notifItem: { flexDirection: 'row', gap: 12, padding: 14, marginBottom: 8, backgroundColor: colors.surfaceElevated,
+    borderRadius: 16, borderWidth: 1, borderColor: colors.border },
+  notifIcon: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  notifItemTitle: { color: colors.text, fontSize: 14, fontWeight: '700', marginBottom: 4 },
+  notifItemMsg: { color: colors.textSecondary, fontSize: 12, lineHeight: 18 },
 });

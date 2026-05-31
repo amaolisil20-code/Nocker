@@ -52,31 +52,47 @@ export default function Categories() {
       <SubHeader title="Categorias" subtitle="Organize suas transações" onAdd={() => setModal(true)} addTestID="add-cat" />
 
       <ScrollView contentContainerStyle={{ paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
-        <Text style={s.section}>Despesas</Text>
-        <View style={s.grid}>
-          {expense.map(c => (
-            <TouchableOpacity key={c.id} style={s.catTile} onLongPress={() => remove(c.id)} activeOpacity={0.85}>
-              <View style={[s.catIcon, { backgroundColor: `${c.color}22`, borderColor: `${c.color}55` }]}>
-                <Ionicons name={c.icon as any} size={20} color={c.color} />
-              </View>
-              <Text style={s.catName} numberOfLines={1}>{c.name}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+        {items.length === 0 && (
+          <View style={s.empty}>
+            <Ionicons name="pricetag-outline" size={48} color={colors.textTertiary} />
+            <Text style={s.emptyTxt}>Nenhuma categoria</Text>
+            <Text style={s.emptySub}>Crie categorias para organizar suas transações</Text>
+          </View>
+        )}
 
-        <Text style={s.section}>Receitas</Text>
-        <View style={s.grid}>
-          {income.map(c => (
-            <TouchableOpacity key={c.id} style={s.catTile} onLongPress={() => remove(c.id)} activeOpacity={0.85}>
-              <View style={[s.catIcon, { backgroundColor: `${c.color}22`, borderColor: `${c.color}55` }]}>
-                <Ionicons name={c.icon as any} size={20} color={c.color} />
-              </View>
-              <Text style={s.catName} numberOfLines={1}>{c.name}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+        {expense.length > 0 && (
+          <>
+            <Text style={s.section}>Despesas</Text>
+            <View style={s.grid}>
+              {expense.map(c => (
+                <TouchableOpacity key={c.id} style={s.catTile} onLongPress={() => remove(c.id)} activeOpacity={0.85}>
+                  <View style={[s.catIcon, { backgroundColor: `${c.color}22`, borderColor: `${c.color}55` }]}>
+                    <Ionicons name={c.icon as any} size={20} color={c.color} />
+                  </View>
+                  <Text style={s.catName} numberOfLines={1}>{c.name}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </>
+        )}
 
-        <Text style={s.hint}>Pressione e segure uma categoria para excluir</Text>
+        {income.length > 0 && (
+          <>
+            <Text style={s.section}>Receitas</Text>
+            <View style={s.grid}>
+              {income.map(c => (
+                <TouchableOpacity key={c.id} style={s.catTile} onLongPress={() => remove(c.id)} activeOpacity={0.85}>
+                  <View style={[s.catIcon, { backgroundColor: `${c.color}22`, borderColor: `${c.color}55` }]}>
+                    <Ionicons name={c.icon as any} size={20} color={c.color} />
+                  </View>
+                  <Text style={s.catName} numberOfLines={1}>{c.name}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </>
+        )}
+
+        {items.length > 0 && <Text style={s.hint}>Pressione e segure uma categoria para excluir</Text>}
       </ScrollView>
 
       <Modal visible={modal} transparent animationType="slide" onRequestClose={() => setModal(false)}>
@@ -133,6 +149,9 @@ const makeStyles = (colors: any) => StyleSheet.create({
     borderRadius: 16, borderWidth: 1, borderColor: colors.border },
   catIcon: { width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 1, marginBottom: 6 },
   catName: { color: '#fff', fontSize: 11, textAlign: 'center' },
+  empty: { alignItems: 'center', paddingVertical: 80, gap: 6 },
+  emptyTxt: { color: colors.text, fontSize: 15, fontWeight: '600', marginTop: 12 },
+  emptySub: { color: colors.textTertiary, fontSize: 12, textAlign: 'center' },
   hint: { color: colors.textTertiary, fontSize: 10, textAlign: 'center', marginTop: 20 },
   modalRoot: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
   sheet: { backgroundColor: colors.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 22, maxHeight: '90%' },

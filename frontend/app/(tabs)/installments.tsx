@@ -13,23 +13,31 @@ import { useTheme } from '../../src/ThemeContext';
 import { SubHeader } from '../../src/components/SubHeader';
 
 const COLORS = ['#3B82F6', '#8B5CF6', '#EC4899', '#16A34A', '#F59E0B', '#EF4444'];
-const CATEGORIES = ['Eletrônicos', 'Móveis', 'Vestuário', 'Educação', 'Viagem', 'Outros'];
 
 export default function Installments() {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const s = makeStyles(colors);
   const [items, setItems] = useState<any[]>([]);
+  const [categories, setCategories] = useState<any[]>([]);
   const [modal, setModal] = useState(false);
   const [name, setName] = useState('');
   const [total, setTotal] = useState('');
-  const [installmentsTotal, setInstallmentsTotal] = useState('12');
-  const [installmentsPaid, setInstallmentsPaid] = useState('0');
-  const [category, setCategory] = useState('Eletrônicos');
+  const [installmentsTotal, setInstallmentsTotal] = useState('');
+  const [installmentsPaid, setInstallmentsPaid] = useState('');
+  const [category, setCategory] = useState('');
   const [color, setColor] = useState(COLORS[0]);
   const [saving, setSaving] = useState(false);
 
-  const load = async () => { try { setItems(await api.listInstallments()); } catch { /* ignore */ } };
+  const expenseCategories = categories.filter(c => c.type === 'expense').map(c => c.name);
+
+  const load = async () => {
+    try {
+      const [inst, cats] = await Promise.all([api.listInstallments(), api.listCategories()]);
+      setItems(inst);
+      setCategories(cats);
+    } catch { /* ignore */ }
+  };
   useFocusEffect(useCallback(() => { load(); }, []));
 
   const save = async () => {
@@ -39,7 +47,8 @@ export default function Installments() {
     const ip = parseInt(installmentsPaid);
     if (!t || t <= 0) return Alert.alert('Atenção', 'Valor inválido');
     if (!it || it < 1) return Alert.alert('Atenção', 'Número de parcelas inválido');
-    if (ip < 0 || ip > it) return Alert.alert('Atenção', 'Parcelas pagas inválido');
+    if (isNaN(ip) || ip < 0 || ip > it) return Alert.alert('Atenção', 'Parcelas pagas inválido');
+    if (!category) return Alert.alert('Atenção', 'Selecione uma categoria. Crie categorias na aba Categorias.');
     setSaving(true);
     try {
       await api.createInstallment({
@@ -47,7 +56,7 @@ export default function Installments() {
         installments_total: it, installments_paid: ip,
         category, color,
       });
-      setModal(false); setName(''); setTotal(''); setInstallmentsTotal('12'); setInstallmentsPaid('0');
+      setModal(false); setName(''); setTotal(''); setInstallmentsTotal(''); setInstallmentsPaid(''); setCategory('');
       await load();
     } catch (e: any) { Alert.alert('Erro', e.message); } finally { setSaving(false); }
   };
@@ -69,7 +78,7 @@ export default function Installments() {
 
   return (
     <View style={[s.c, { paddingTop: insets.top + 12 }]}>
-      <SubHeader title="Parcelados" subtitle="Compras em parcelas" onAdd={() => setModal(true)} addTestID="add-inst" />
+      <SubHeader title="Parcelados" subtitle="Compras em parcelas" onAdd={() => { setCategory(''); setModal(true); }} addTestID="add-inst" />
 
       <ScrollView contentContainerStyle={{ paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
         <View style={s.summaryRow}>
@@ -143,22 +152,26 @@ export default function Installments() {
             <View style={{ flexDirection: 'row', gap: 10 }}>
               <View style={{ flex: 1 }}>
                 <Text style={s.label}>Parcelas total</Text>
-                <TextInput value={installmentsTotal} onChangeText={setInstallmentsTotal} keyboardType="number-pad" style={s.input} />
+                <TextInput value={installmentsTotal} onChangeText={setInstallmentsTotal} keyboardType="number-pad" placeholder="12" placeholderTextColor={colors.textTertiary} style={s.input} />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={s.label}>Já pagas</Text>
-                <TextInput value={installmentsPaid} onChangeText={setInstallmentsPaid} keyboardType="number-pad" style={s.input} />
+                <TextInput value={installmentsPaid} onChangeText={setInstallmentsPaid} keyboardType="number-pad" placeholder="0" placeholderTextColor={colors.textTertiary} style={s.input} />
               </View>
             </View>
 
             <Text style={s.label}>Categoria</Text>
-            <View style={s.chipRow}>
-              {CATEGORIES.map(c => (
-                <TouchableOpacity key={c} style={[s.chip, category === c && s.chipActive]} onPress={() => setCategory(c)}>
-                  <Text style={[s.chipTxt, category === c && { color: '#fff' }]}>{c}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+            {expenseCategories.length === 0 ? (
+              <Text style={s.noCatHint}>Nenhuma categoria de despesa. Crie na aba Categorias.</Text>
+            ) : (
+              <View style={s.chipRow}>
+                {expenseCategories.map(c => (
+                  <TouchableOpacity key={c} style={[s.chip, category === c && s.chipActive]} onPress={() => setCategory(c)}>
+                    <Text style={[s.chipTxt, category === c && { color: '#fff' }]}>{c}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
 
             <Text style={s.label}>Cor</Text>
             <View style={s.chipRow}>
@@ -208,6 +221,7 @@ const makeStyles = (colors: any) => StyleSheet.create({
   chip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceElevated },
   chipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   chipTxt: { color: colors.textSecondary, fontSize: 12, fontWeight: '600' },
+  noCatHint: { color: colors.textTertiary, fontSize: 12, lineHeight: 18, marginBottom: 8 },
   colorDot: { width: 36, height: 36, borderRadius: 18, borderWidth: 2, borderColor: 'transparent' },
   colorActive: { borderColor: '#fff' },
   saveBtn: { backgroundColor: colors.primary, borderRadius: 999, height: 52, alignItems: 'center', justifyContent: 'center', marginTop: 20 },

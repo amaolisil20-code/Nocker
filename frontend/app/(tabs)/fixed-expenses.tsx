@@ -12,22 +12,30 @@ import { useTheme } from '../../src/ThemeContext';
 import { SubHeader } from '../../src/components/SubHeader';
 
 const COLORS = ['#EF4444', '#F59E0B', '#3B82F6', '#8B5CF6', '#16A34A', '#EC4899'];
-const CATEGORIES = ['Moradia', 'Transporte', 'Alimentação', 'Lazer', 'Saúde', 'Educação', 'Outros'];
 
 export default function FixedExpenses() {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const s = makeStyles(colors);
   const [items, setItems] = useState<any[]>([]);
+  const [categories, setCategories] = useState<any[]>([]);
   const [modal, setModal] = useState(false);
   const [name, setName] = useState('');
   const [amount, setAmount] = useState('');
-  const [dueDay, setDueDay] = useState('10');
-  const [category, setCategory] = useState('Moradia');
+  const [dueDay, setDueDay] = useState('');
+  const [category, setCategory] = useState('');
   const [color, setColor] = useState(COLORS[0]);
   const [saving, setSaving] = useState(false);
 
-  const load = async () => { try { setItems(await api.listFixedExpenses()); } catch { /* ignore */ } };
+  const expenseCategories = categories.filter(c => c.type === 'expense').map(c => c.name);
+
+  const load = async () => {
+    try {
+      const [fixed, cats] = await Promise.all([api.listFixedExpenses(), api.listCategories()]);
+      setItems(fixed);
+      setCategories(cats);
+    } catch { /* ignore */ }
+  };
   useFocusEffect(useCallback(() => { load(); }, []));
 
   const save = async () => {
@@ -36,10 +44,11 @@ export default function FixedExpenses() {
     const d = parseInt(dueDay);
     if (!v || v <= 0) return Alert.alert('Atenção', 'Valor inválido');
     if (!d || d < 1 || d > 31) return Alert.alert('Atenção', 'Dia inválido (1-31)');
+    if (!category) return Alert.alert('Atenção', 'Selecione uma categoria. Crie categorias na aba Categorias.');
     setSaving(true);
     try {
       await api.createFixedExpense({ name: name.trim(), amount: v, due_day: d, category, color, active: true });
-      setModal(false); setName(''); setAmount(''); setDueDay('10');
+      setModal(false); setName(''); setAmount(''); setDueDay(''); setCategory('');
       await load();
     } catch (e: any) { Alert.alert('Erro', e.message); } finally { setSaving(false); }
   };
@@ -58,7 +67,7 @@ export default function FixedExpenses() {
 
   return (
     <View style={[s.c, { paddingTop: insets.top + 12 }]}>
-      <SubHeader title="Gastos Fixos" subtitle="Contas mensais recorrentes" onAdd={() => setModal(true)} addTestID="add-fixed" />
+      <SubHeader title="Gastos Fixos" subtitle="Contas mensais recorrentes" onAdd={() => { setCategory(''); setModal(true); }} addTestID="add-fixed" />
 
       <ScrollView contentContainerStyle={{ paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
         <View style={s.totalCard}>
@@ -111,17 +120,21 @@ export default function FixedExpenses() {
               value={amount} onChangeText={setAmount} keyboardType="decimal-pad" style={s.input} />
 
             <Text style={s.label}>Dia do vencimento</Text>
-            <TextInput placeholder="10" placeholderTextColor={colors.textTertiary}
+            <TextInput placeholder="1-31" placeholderTextColor={colors.textTertiary}
               value={dueDay} onChangeText={setDueDay} keyboardType="number-pad" style={s.input} />
 
             <Text style={s.label}>Categoria</Text>
-            <View style={s.chipRow}>
-              {CATEGORIES.map(c => (
-                <TouchableOpacity key={c} style={[s.chip, category === c && s.chipActive]} onPress={() => setCategory(c)}>
-                  <Text style={[s.chipTxt, category === c && { color: '#fff' }]}>{c}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+            {expenseCategories.length === 0 ? (
+              <Text style={s.noCatHint}>Nenhuma categoria de despesa. Crie na aba Categorias.</Text>
+            ) : (
+              <View style={s.chipRow}>
+                {expenseCategories.map(c => (
+                  <TouchableOpacity key={c} style={[s.chip, category === c && s.chipActive]} onPress={() => setCategory(c)}>
+                    <Text style={[s.chipTxt, category === c && { color: '#fff' }]}>{c}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
 
             <Text style={s.label}>Cor</Text>
             <View style={s.chipRow}>
@@ -170,6 +183,7 @@ const makeStyles = (colors: any) => StyleSheet.create({
   chip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceElevated },
   chipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   chipTxt: { color: colors.textSecondary, fontSize: 12, fontWeight: '600' },
+  noCatHint: { color: colors.textTertiary, fontSize: 12, lineHeight: 18, marginBottom: 8 },
   colorDot: { width: 36, height: 36, borderRadius: 18, borderWidth: 2, borderColor: 'transparent' },
   colorActive: { borderColor: '#fff' },
   saveBtn: { backgroundColor: colors.primary, borderRadius: 999, height: 52, alignItems: 'center', justifyContent: 'center', marginTop: 20 },
