@@ -12,7 +12,7 @@ import { useAuth } from '../../src/AuthContext';
 import { useTheme } from '../../src/ThemeContext';
 import { api } from '../../src/api';
 import {
-  AI_TONE_OPTIONS, AI_VOICE_OPTIONS, AiTone, AiVoice,
+  AI_TONE_OPTIONS, AiTone,
   getAiSettings, saveAiSettings,
 } from '../../src/aiSettings';
 import * as ImagePicker from 'expo-image-picker';
@@ -64,7 +64,7 @@ function parseCurrency(val: string): number {
 // ─────────────────────────────────────────────────────────────
 type FinancialTab = 'geral' | 'categorias';
 type NotificationTab = 'lembretes' | 'alertas' | 'sons';
-type AiTab = 'personalidade' | 'tom' | 'voz' | 'chat';
+type AiTab = 'personalidade' | 'tom';
 
 const NOTIF_PREFS_KEY = 'nocker_notification_prefs';
 const SECURITY_PREFS_KEY = 'nocker_security_prefs';
@@ -157,14 +157,14 @@ export default function Settings() {
   const [pinConfirm, setPinConfirm] = useState('');
   const [savingPin, setSavingPin] = useState(false);
 
+  // Ajuda e Suporte
+  const [helpModal, setHelpModal] = useState(false);
+
   // IA / Assistente
   const [aiModal, setAiModal] = useState(false);
   const [aiTab, setAiTab] = useState<AiTab>('personalidade');
   const [aiPersonality, setAiPersonality] = useState('');
   const [aiTone, setAiTone] = useState<AiTone>('motivador');
-  const [aiVoiceEnabled, setAiVoiceEnabled] = useState(false);
-  const [aiVoice, setAiVoice] = useState<AiVoice>('feminina');
-  const [aiChatEnabled, setAiChatEnabled] = useState(true);
   const [savingAiPersonality, setSavingAiPersonality] = useState(false);
 
   // ── Load profile modal ───────────────────────────────────────
@@ -328,9 +328,6 @@ export default function Settings() {
     const prefs = await getAiSettings();
     setAiPersonality(prefs.personality);
     setAiTone(prefs.tone);
-    setAiVoiceEnabled(prefs.voiceEnabled);
-    setAiVoice(prefs.voice);
-    setAiChatEnabled(prefs.financialChatEnabled);
   };
 
   const openAiAssistant = () => {
@@ -352,26 +349,6 @@ export default function Settings() {
   const selectAiTone = async (tone: AiTone) => {
     setAiTone(tone);
     await saveAiSettings({ tone });
-  };
-
-  const toggleAiVoice = async (value: boolean) => {
-    setAiVoiceEnabled(value);
-    await saveAiSettings({ voiceEnabled: value });
-  };
-
-  const selectAiVoice = async (voice: AiVoice) => {
-    setAiVoice(voice);
-    await saveAiSettings({ voice });
-  };
-
-  const toggleAiChat = async (value: boolean) => {
-    setAiChatEnabled(value);
-    await saveAiSettings({ financialChatEnabled: value });
-  };
-
-  const openFinancialChat = () => {
-    setAiModal(false);
-    router.push('/(tabs)/chat');
   };
 
   const setNotificationTabAndLoad = (tab: NotificationTab) => {
@@ -691,7 +668,6 @@ export default function Settings() {
         <Text style={s.section}>{t.account}</Text>
         <View style={s.group}>
           <Item icon="person-outline" label={t.profile} hint={t.profileHint} onPress={openProfile} />
-          {/* ← Item Financeiro conectado ao modal */}
           <Item
             icon="cash-outline"
             label="Financeiro"
@@ -728,7 +704,7 @@ export default function Settings() {
         <View style={s.group}>
           <Item icon="cloud-upload-outline" label={t.export}  hint={t.exportHint}  onPress={() => Alert.alert(t.comingSoon, '')} />
           <Item icon="link-outline"         label={t.banking} hint={t.bankingHint} onPress={() => Alert.alert(t.comingSoon, '')} />
-          <Item icon="help-circle-outline"  label={t.help}    hint={t.helpHint}    onPress={() => Alert.alert(t.comingSoon, '')} />
+          <Item icon="help-circle-outline"  label={t.help}    hint={t.helpHint}    onPress={() => setHelpModal(true)} />
         </View>
 
         <Text style={s.foot}>{t.version}</Text>
@@ -835,7 +811,6 @@ export default function Settings() {
           <View style={[s.sheet, { maxHeight: '92%' }]}>
             <View style={s.sheetHandle} />
 
-            {/* Sheet header */}
             <View style={s.sheetHeader}>
               <Text style={s.sheetTitle}>Financeiro</Text>
               <TouchableOpacity onPress={() => setFinancialModal(false)} style={s.sheetClose}>
@@ -843,7 +818,6 @@ export default function Settings() {
               </TouchableOpacity>
             </View>
 
-            {/* Tabs */}
             <View style={s.tabRow}>
               {(['geral', 'categorias'] as FinancialTab[]).map(tab => (
                 <TouchableOpacity
@@ -858,7 +832,6 @@ export default function Settings() {
               ))}
             </View>
 
-            {/* ── Tab: Geral ── */}
             {financialTab === 'geral' && (
               <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
                 <View style={s.infoBox}>
@@ -907,7 +880,6 @@ export default function Settings() {
               </ScrollView>
             )}
 
-            {/* ── Tab: Categorias ── */}
             {financialTab === 'categorias' && (
               <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
                 <View style={s.infoBox}>
@@ -980,7 +952,6 @@ export default function Settings() {
               </ScrollView>
             )}
 
-            {/* Editor de limite por categoria (overlay dentro do sheet — funciona no iOS) */}
             {catLimitModal && selectedCat && (
               <KeyboardAvoidingView
                 behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -1068,7 +1039,6 @@ export default function Settings() {
                     Receba lembretes antes do vencimento dos seus gastos fixos e contas recorrentes.
                   </Text>
                 </View>
-
                 <View style={s.alertCard}>
                   <View style={{ flex: 1 }}>
                     <Text style={s.alertLabel}>Lembretes de contas</Text>
@@ -1095,13 +1065,11 @@ export default function Settings() {
                     Ative alertas para ser avisado quando seus gastos atingirem um percentual dos limites configurados.
                   </Text>
                 </View>
-
                 {alerts.map(alert => (
                   <View key={alert.type} style={s.alertCard}>
                     <View style={{ flex: 1 }}>
                       <Text style={s.alertLabel}>{alertLabels[alert.type]}</Text>
                       <Text style={s.alertHint}>{alertHints[alert.type]}</Text>
-
                       <View style={s.pctRow}>
                         <Text style={s.pctLabel}>Percentual de alerta</Text>
                         <View style={s.pctBtns}>
@@ -1120,7 +1088,6 @@ export default function Settings() {
                         </View>
                       </View>
                     </View>
-
                     <Switch
                       value={alert.active}
                       onValueChange={() => toggleAlert(alert)}
@@ -1142,7 +1109,6 @@ export default function Settings() {
                     Personalize como o app chama sua atenção ao exibir notificações.
                   </Text>
                 </View>
-
                 <View style={s.alertCard}>
                   <View style={{ flex: 1 }}>
                     <Text style={s.alertLabel}>Som</Text>
@@ -1155,7 +1121,6 @@ export default function Settings() {
                     thumbColor="#fff"
                   />
                 </View>
-
                 <View style={s.alertCard}>
                   <View style={{ flex: 1 }}>
                     <Text style={s.alertLabel}>Vibração</Text>
@@ -1188,12 +1153,11 @@ export default function Settings() {
               </TouchableOpacity>
             </View>
 
+            {/* Tabs: apenas Personalidade e Tom */}
             <View style={s.tabRow}>
               {([
                 { key: 'personalidade' as AiTab, label: 'Personalidade' },
                 { key: 'tom' as AiTab, label: 'Tom' },
-                { key: 'voz' as AiTab, label: 'Voz' },
-                { key: 'chat' as AiTab, label: 'Chat' },
               ]).map(tab => (
                 <TouchableOpacity
                   key={tab.key}
@@ -1260,78 +1224,101 @@ export default function Settings() {
                 <View style={{ height: 20 }} />
               </ScrollView>
             )}
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
 
-            {aiTab === 'voz' && (
-              <ScrollView showsVerticalScrollIndicator={false}>
-                <View style={s.infoBox}>
-                  <Ionicons name="information-circle-outline" size={16} color={colors.textSecondary} />
-                  <Text style={s.infoTxt}>Configure a voz da IA para respostas faladas no app.</Text>
-                </View>
-                <View style={s.alertCard}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={s.alertLabel}>Voz da IA</Text>
-                    <Text style={s.alertHint}>Ler respostas da IA em voz alta.</Text>
-                  </View>
-                  <Switch
-                    value={aiVoiceEnabled}
-                    onValueChange={toggleAiVoice}
-                    trackColor={{ false: colors.border, true: colors.primary }}
-                    thumbColor="#fff"
-                  />
-                </View>
-                {aiVoiceEnabled && (
-                  <>
-                    <Text style={[s.fieldLabel, { marginTop: 8 }]}>Tipo de voz</Text>
-                    <View style={s.pctBtns}>
-                      {AI_VOICE_OPTIONS.map(option => (
-                        <TouchableOpacity
-                          key={option.key}
-                          style={[s.pctBtn, aiVoice === option.key && s.pctBtnActive]}
-                          onPress={() => selectAiVoice(option.key)}
-                        >
-                          <Text style={[s.pctBtnTxt, aiVoice === option.key && s.pctBtnTxtActive]}>
-                            {option.label}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  </>
-                )}
-                <View style={{ height: 20 }} />
-              </ScrollView>
-            )}
+      {/* ═══ Help Modal ═════════════════════════════════════════════ */}
+      <Modal visible={helpModal} transparent animationType="slide" onRequestClose={() => setHelpModal(false)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.modalRoot}>
+          <TouchableOpacity style={{ flex: 1 }} onPress={() => setHelpModal(false)} />
+          <View style={[s.sheet, { maxHeight: '92%' }]}>
+            <View style={s.sheetHandle} />
+            <View style={s.sheetHeader}>
+              <Text style={s.sheetTitle}>Ajuda e Suporte</Text>
+              <TouchableOpacity onPress={() => setHelpModal(false)} style={s.sheetClose}>
+                <Ionicons name="close" size={20} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
 
-            {aiTab === 'chat' && (
-              <ScrollView showsVerticalScrollIndicator={false}>
-                <View style={s.infoBox}>
-                  <Ionicons name="information-circle-outline" size={16} color={colors.textSecondary} />
-                  <Text style={s.infoTxt}>
-                    O chat financeiro usa seus dados reais para dar insights sobre gastos, metas e economia.
-                  </Text>
-                </View>
-                <View style={s.alertCard}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={s.alertLabel}>Chat financeiro</Text>
-                    <Text style={s.alertHint}>Permitir conversas com a Nocker IA sobre suas finanças.</Text>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {/* Central de ajuda */}
+              <View style={s.helpGroup}>
+                <TouchableOpacity style={s.helpRow} onPress={() => Alert.alert('Central de ajuda', 'Em breve disponível.')} activeOpacity={0.8}>
+                  <View style={s.helpRowIcon}>
+                    <Ionicons name="help-buoy-outline" size={18} color={colors.primary} />
                   </View>
-                  <Switch
-                    value={aiChatEnabled}
-                    onValueChange={toggleAiChat}
-                    trackColor={{ false: colors.border, true: colors.primary }}
-                    thumbColor="#fff"
-                  />
-                </View>
-                <TouchableOpacity
-                  style={[s.saveBtn, !aiChatEnabled && { opacity: 0.5 }]}
-                  onPress={openFinancialChat}
-                  disabled={!aiChatEnabled}
-                >
-                  <Ionicons name="chatbubbles-outline" size={18} color="#fff" />
-                  <Text style={s.saveTxt}>Abrir chat financeiro</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.helpRowLabel}>Central de ajuda</Text>
+                    <Text style={s.helpRowHint}>Dúvidas frequentes e tutoriais</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
                 </TouchableOpacity>
-                <View style={{ height: 20 }} />
-              </ScrollView>
-            )}
+
+                {/* Reportar bug */}
+                <TouchableOpacity style={s.helpRow} onPress={() => Alert.alert('Reportar bug', 'Em breve disponível.')} activeOpacity={0.8}>
+                  <View style={s.helpRowIcon}>
+                    <Ionicons name="bug-outline" size={18} color={colors.primary} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.helpRowLabel}>Reportar bug</Text>
+                    <Text style={s.helpRowHint}>Encontrou um problema? Nos avise</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
+                </TouchableOpacity>
+
+                {/* Sugerir funcionalidade */}
+                <TouchableOpacity style={s.helpRow} onPress={() => Alert.alert('Sugerir funcionalidade', 'Em breve disponível.')} activeOpacity={0.8}>
+                  <View style={s.helpRowIcon}>
+                    <Ionicons name="bulb-outline" size={18} color={colors.primary} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.helpRowLabel}>Sugerir funcionalidade</Text>
+                    <Text style={s.helpRowHint}>Tem uma ideia? Adoramos ouvir</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
+                </TouchableOpacity>
+
+                {/* Avaliar app */}
+                <TouchableOpacity style={[s.helpRow, { borderBottomWidth: 0 }]} onPress={() => Alert.alert('Avaliar app', 'Em breve disponível.')} activeOpacity={0.8}>
+                  <View style={s.helpRowIcon}>
+                    <Ionicons name="star-outline" size={18} color={colors.primary} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.helpRowLabel}>Avaliar app</Text>
+                    <Text style={s.helpRowHint}>Deixe sua avaliação na loja</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
+                </TouchableOpacity>
+              </View>
+
+              {/* Legal */}
+              <View style={[s.helpGroup, { marginTop: 12 }]}>
+                <TouchableOpacity style={s.helpRow} onPress={() => Alert.alert('Termos de uso', 'Em breve disponível.')} activeOpacity={0.8}>
+                  <View style={s.helpRowIcon}>
+                    <Ionicons name="document-text-outline" size={18} color={colors.primary} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.helpRowLabel}>Termos de uso</Text>
+                    <Text style={s.helpRowHint}>Condições de utilização do app</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
+                </TouchableOpacity>
+
+                <TouchableOpacity style={[s.helpRow, { borderBottomWidth: 0 }]} onPress={() => Alert.alert('Política de privacidade', 'Em breve disponível.')} activeOpacity={0.8}>
+                  <View style={s.helpRowIcon}>
+                    <Ionicons name="shield-outline" size={18} color={colors.primary} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.helpRowLabel}>Política de privacidade</Text>
+                    <Text style={s.helpRowHint}>Como tratamos seus dados</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
+                </TouchableOpacity>
+              </View>
+
+              <View style={{ height: 24 }} />
+            </ScrollView>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -1542,12 +1529,10 @@ export default function Settings() {
 const makeStyles = (colors: any) => StyleSheet.create({
   c: { flex: 1, backgroundColor: colors.bg },
 
-  // header
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 },
   backBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.border },
   title: { color: colors.text, fontSize: 18, fontWeight: '700' },
 
-  // profile card
   profileCard: { backgroundColor: colors.surface, borderRadius: 24, padding: 20, borderWidth: 1, borderColor: colors.border, marginBottom: 18, flexDirection: 'row', alignItems: 'center', gap: 14 },
   avatarWrap: { position: 'relative' },
   avatarImg: { width: 68, height: 68, borderRadius: 34 },
@@ -1561,7 +1546,6 @@ const makeStyles = (colors: any) => StyleSheet.create({
   profileEditHint: { flexDirection: 'row', alignItems: 'center', gap: 2 },
   profileEditHintTxt: { color: colors.primary, fontSize: 12, fontWeight: '600' },
 
-  // section / group / item
   section: { color: colors.textTertiary, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.6, marginTop: 18, marginBottom: 8, marginLeft: 4 },
   group: { backgroundColor: colors.surface, borderRadius: 18, borderWidth: 1, borderColor: colors.border, overflow: 'hidden' },
   item: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderBottomWidth: 1, borderBottomColor: colors.border },
@@ -1569,21 +1553,18 @@ const makeStyles = (colors: any) => StyleSheet.create({
   itemLabel: { color: colors.text, fontSize: 14, fontWeight: '600' },
   itemHint: { color: colors.textTertiary, fontSize: 11, marginTop: 2 },
 
-  // logout / delete account
   logout: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 8, backgroundColor: 'rgba(239,68,68,0.1)', borderRadius: 14, paddingVertical: 14, borderWidth: 1, borderColor: 'rgba(239,68,68,0.25)' },
   logoutTxt: { color: '#EF4444', fontWeight: '700', fontSize: 14 },
   deleteAccountBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 10, backgroundColor: 'rgba(239,68,68,0.06)', borderRadius: 14, paddingVertical: 14, borderWidth: 1, borderColor: 'rgba(239,68,68,0.2)' },
   deleteAccountTxt: { color: '#EF4444', fontWeight: '700', fontSize: 14 },
   foot: { color: colors.textTertiary, fontSize: 11, textAlign: 'center', marginTop: 24 },
 
-  // security modal
   securityGroup: { backgroundColor: colors.surfaceElevated, borderRadius: 16, borderWidth: 1, borderColor: colors.border, overflow: 'hidden', marginBottom: 8 },
   securityRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderBottomWidth: 1, borderBottomColor: colors.border },
   securityRowIcon: { width: 38, height: 38, borderRadius: 12, backgroundColor: `${colors.primary}22`, alignItems: 'center', justifyContent: 'center' },
   securityRowLabel: { color: colors.text, fontSize: 14, fontWeight: '600' },
   securityRowHint: { color: colors.textTertiary, fontSize: 11, marginTop: 2 },
 
-  // modal base
   modalRoot: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
   sheet: { backgroundColor: colors.surface, borderTopLeftRadius: 30, borderTopRightRadius: 30, paddingHorizontal: 22, paddingTop: 12, maxHeight: '92%', overflow: 'hidden' },
   sheetHandle: { width: 44, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: 'center', marginBottom: 16 },
@@ -1591,18 +1572,15 @@ const makeStyles = (colors: any) => StyleSheet.create({
   sheetTitle: { color: colors.text, fontSize: 20, fontWeight: '700' },
   sheetClose: { width: 34, height: 34, borderRadius: 17, backgroundColor: colors.surfaceElevated, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.border },
 
-  // financial tabs
   tabRow: { flexDirection: 'row', backgroundColor: colors.surfaceElevated, borderRadius: 14, padding: 4, marginBottom: 18, gap: 4 },
   tabBtn: { flex: 1, paddingVertical: 9, borderRadius: 10, alignItems: 'center' },
   tabBtnActive: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
   tabTxt: { color: colors.textSecondary, fontSize: 13, fontWeight: '600' },
   tabTxtActive: { color: colors.text },
 
-  // info box
   infoBox: { flexDirection: 'row', gap: 8, backgroundColor: colors.surfaceElevated, borderRadius: 12, padding: 12, marginBottom: 16, alignItems: 'flex-start' },
   infoTxt: { color: colors.textSecondary, fontSize: 12, flex: 1, lineHeight: 18 },
 
-  // category limit list
   catLimitRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.surfaceElevated, borderRadius: 14, marginBottom: 8, borderWidth: 1, borderColor: colors.border, overflow: 'hidden' },
   catLimitMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14 },
   catLimitTrash: { paddingHorizontal: 14, paddingVertical: 14, borderLeftWidth: 1, borderLeftColor: colors.border },
@@ -1618,12 +1596,10 @@ const makeStyles = (colors: any) => StyleSheet.create({
   catLimitSheet: { backgroundColor: colors.surfaceElevated, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 22, paddingTop: 12, paddingBottom: 8, borderTopWidth: 1, borderColor: colors.border },
   catLimitSheetSub: { color: colors.textSecondary, fontSize: 12, marginTop: 4 },
 
-  // empty state
   emptyBox: { alignItems: 'center', paddingVertical: 40, gap: 8 },
   emptyTxt: { color: colors.textSecondary, fontSize: 14, fontWeight: '600' },
   emptyHint: { color: colors.textTertiary, fontSize: 12 },
 
-  // alerts
   alertCard: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, backgroundColor: colors.surfaceElevated, borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: colors.border },
   alertLabel: { color: colors.text, fontSize: 14, fontWeight: '600', marginBottom: 2 },
   alertHint: { color: colors.textTertiary, fontSize: 11, lineHeight: 16, marginBottom: 10 },
@@ -1638,7 +1614,6 @@ const makeStyles = (colors: any) => StyleSheet.create({
   toneCard: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: colors.surfaceElevated, borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: colors.border },
   toneCardActive: { borderColor: colors.primary, backgroundColor: `${colors.primary}12` },
 
-  // avatar section (profile edit)
   avatarSection: { alignItems: 'center', marginBottom: 24 },
   avatarLarge: { width: 96, height: 96, borderRadius: 48, marginBottom: 12 },
   avatarLargeFallback: { width: 96, height: 96, borderRadius: 48, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
@@ -1646,7 +1621,6 @@ const makeStyles = (colors: any) => StyleSheet.create({
   changePhotoBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: colors.primary, backgroundColor: `${colors.primary}15` },
   changePhotoTxt: { color: colors.primary, fontSize: 13, fontWeight: '600' },
 
-  // fields
   fieldGroup: { marginBottom: 14 },
   fieldLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
   fieldLabel: { color: colors.textSecondary, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },
@@ -1657,9 +1631,15 @@ const makeStyles = (colors: any) => StyleSheet.create({
   fieldIcon: { width: 28, alignItems: 'center' },
   fieldInput: { flex: 1, color: colors.text, fontSize: 15 },
 
-  // save / cancel
   saveBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: colors.primary, borderRadius: 999, height: 54, marginTop: 16 },
   saveTxt: { color: '#fff', fontWeight: '700', fontSize: 15 },
   cancelBtn: { borderRadius: 999, height: 48, alignItems: 'center', justifyContent: 'center', marginTop: 10, borderWidth: 1, borderColor: colors.border },
   cancelTxt: { color: colors.textSecondary, fontWeight: '600', fontSize: 15 },
+
+  // help modal
+  helpGroup: { backgroundColor: colors.surfaceElevated, borderRadius: 18, borderWidth: 1, borderColor: colors.border, overflow: 'hidden' },
+  helpRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderBottomWidth: 1, borderBottomColor: colors.border },
+  helpRowIcon: { width: 38, height: 38, borderRadius: 12, backgroundColor: `${colors.primary}22`, alignItems: 'center', justifyContent: 'center' },
+  helpRowLabel: { color: colors.text, fontSize: 14, fontWeight: '600' },
+  helpRowHint: { color: colors.textTertiary, fontSize: 11, marginTop: 2 },
 });
