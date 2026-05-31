@@ -37,3 +37,17 @@ yarn-error.*
 *.tsbuildinfo
 
 app-example
+
+# Expo
+.expo/
+.expo-shared/
+
+# Metro
+.metro-cache/
+**/.metro-cache/
+
+# Emergent
+.emergent/
+
+# Logs
+*.log
