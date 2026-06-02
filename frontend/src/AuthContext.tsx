@@ -16,6 +16,7 @@ type AuthCtx = {
   user: User | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
+  loginWithGoogle: (google_id: string, email: string, name: string, avatar_url?: string) => Promise<void>;
   register: (name: string, email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
@@ -52,6 +53,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(r.user);
   };
 
+  const loginWithGoogle = async (google_id: string, email: string, name: string, avatar_url?: string) => {
+    const r = await api.googleLogin(google_id, email, name, avatar_url);
+    await setToken(r.token);
+    setUser(r.user);
+  };
+
   const register = async (name: string, email: string, password: string) => {
     const r = await api.register(name, email, password);
     await setToken(r.token);
@@ -71,7 +78,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <Ctx.Provider value={{ user, loading, login, register, logout, refreshUser, setUser }}>
+    <Ctx.Provider value={{ user, loading, login, loginWithGoogle, register, logout, refreshUser, setUser }}>
       {children}
     </Ctx.Provider>
   );
