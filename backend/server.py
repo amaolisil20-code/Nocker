@@ -71,6 +71,12 @@ class AuthResponse(BaseModel):
     token: str
     user: UserOut
 
+class GoogleLogin(BaseModel):
+    google_id: str
+    email: EmailStr
+    name: str
+    avatar_url: Optional[str] = None
+
 class TransactionCreate(BaseModel):
     type: Literal['income', 'expense']
     amount: float
@@ -336,6 +342,40 @@ async def login(payload: UserLogin):
     user = response.data[0] if response.data else None
     if not user or not verify_password(payload.password, user['password']):
         raise HTTPException(status_code=401, detail="Email ou senha inválidos")
+    token = create_token(user['id'])
+    return AuthResponse(token=token, user=user_to_out(user))
+
+@api_router.post("/auth/google", response_model=AuthResponse)
+async def google_login(payload: GoogleLogin):
+    # Busca usuário pelo google_id ou email
+    response = supabase.table('users').select('*').eq('email', payload.email.lower()).execute()
+    user = response.data[0] if response.data else None
+
+    if user:
+        # Usuário já existe — atualiza google_id e avatar se necessário
+        update_data: dict = {}
+        if not user.get('google_id'):
+            update_data['google_id'] = payload.google_id
+        if payload.avatar_url and not user.get('avatar_url'):
+            update_data['avatar_url'] = payload.avatar_url
+        if update_data:
+            update_data['updated_at'] = datetime.now(timezone.utc).isoformat()
+            res = supabase.table('users').update(update_data).eq('id', user['id']).execute()
+            user = res.data[0] if res.data else user
+    else:
+        # Cria novo usuário via Google
+        user_id = str(uuid.uuid4())
+        user = {
+            "id": user_id,
+            "name": payload.name.strip(),
+            "email": payload.email.lower(),
+            "password": hash_password(payload.google_id),  # senha fictícia, não usada
+            "google_id": payload.google_id,
+            "avatar_url": payload.avatar_url,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        supabase.table('users').insert(user).execute()
+
     token = create_token(user['id'])
     return AuthResponse(token=token, user=user_to_out(user))
 

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   KeyboardAvoidingView, Platform, ScrollView, Alert, ActivityIndicator, Image,
@@ -20,7 +20,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 export default function Login() {
   const router = useRouter();
-  const { login, register } = useAuth();
+  const { login, loginWithGoogle } = useAuth();
   const { colors, t, themeMode } = useTheme();
   const s = makeStyles(colors, themeMode);
   const [email, setEmail] = useState('');
@@ -28,6 +28,52 @@ export default function Login() {
   const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
   const [googleBusy, setGoogleBusy] = useState(false);
+
+  // Escuta o deep link de callback do OAuth
+  useEffect(() => {
+    const handleUrl = async (url: string) => {
+      if (!url) return;
+      try {
+        // Trata tanto fragment (#) quanto query string (?)
+        const fragment = url.split('#')[1] || '';
+        const query = url.split('?')[1]?.split('#')[0] || '';
+        const params = new URLSearchParams(fragment || query);
+        const accessToken = params.get('access_token');
+        const refreshToken = params.get('refresh_token');
+
+        if (accessToken) {
+          setGoogleBusy(true);
+          const { data: sessionData, error: sessionError } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken || '',
+          });
+          if (sessionError) throw sessionError;
+
+          const googleUser = sessionData?.user;
+          if (googleUser?.email) {
+            await loginWithGoogle(
+              googleUser.id,
+              googleUser.email,
+              googleUser.user_metadata?.full_name || googleUser.email.split('@')[0],
+              googleUser.user_metadata?.avatar_url,
+            );
+            router.replace('/(tabs)/dashboard');
+          }
+        }
+      } catch (e: any) {
+        Alert.alert('Erro', e.message || 'Não foi possível entrar com Google');
+      } finally {
+        setGoogleBusy(false);
+      }
+    };
+
+    // Verifica URL inicial (app aberto pelo deep link)
+    Linking.getInitialURL().then((url) => { if (url) handleUrl(url); });
+
+    // Escuta mudanças de URL enquanto o app está aberto
+    const sub = Linking.addEventListener('url', ({ url }) => handleUrl(url));
+    return () => sub.remove();
+  }, []);
 
   const submit = async () => {
     if (!email || !password) return Alert.alert('Atenção', 'Preencha todos os campos');
@@ -40,10 +86,10 @@ export default function Login() {
     } finally { setBusy(false); }
   };
 
-  const loginWithGoogle = async () => {
+  const handleGoogleLogin = async () => {
     setGoogleBusy(true);
     try {
-      const redirectUrl = Linking.createURL('/auth/callback');
+      const redirectUrl = Linking.createURL('/');
 
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
@@ -59,37 +105,40 @@ export default function Login() {
       const result = await WebBrowser.openAuthSessionAsync(data.url, redirectUrl);
 
       if (result.type === 'success' && result.url) {
+        // O useEffect acima irá capturar a URL e processar o token
+        // Mas caso o openAuthSessionAsync retorne antes do listener, processamos aqui também
         const url = result.url;
         const fragment = url.split('#')[1] || '';
-        const params = new URLSearchParams(fragment);
+        const query = url.split('?')[1]?.split('#')[0] || '';
+        const params = new URLSearchParams(fragment || query);
         const accessToken = params.get('access_token');
+        const refreshToken = params.get('refresh_token');
 
         if (accessToken) {
           const { data: sessionData, error: sessionError } = await supabase.auth.setSession({
             access_token: accessToken,
-            refresh_token: params.get('refresh_token') || '',
+            refresh_token: refreshToken || '',
           });
           if (sessionError) throw sessionError;
 
           const googleUser = sessionData?.user;
           if (googleUser?.email) {
-            try {
-              await login(googleUser.email, googleUser.id);
-            } catch {
-              await register(
-                googleUser.user_metadata?.full_name || googleUser.email.split('@')[0],
-                googleUser.email,
-                googleUser.id
-              );
-            }
+            await loginWithGoogle(
+              googleUser.id,
+              googleUser.email,
+              googleUser.user_metadata?.full_name || googleUser.email.split('@')[0],
+              googleUser.user_metadata?.avatar_url,
+            );
             router.replace('/(tabs)/dashboard');
           }
-        } else {
+        } else if (result.type !== 'cancel') {
           Alert.alert('Erro', 'Não foi possível obter o token de acesso');
         }
       }
     } catch (e: any) {
-      Alert.alert('Erro', e.message || 'Não foi possível entrar com Google');
+      if ((e as any)?.message !== 'cancelled') {
+        Alert.alert('Erro', e.message || 'Não foi possível entrar com Google');
+      }
     } finally {
       setGoogleBusy(false);
     }
@@ -150,7 +199,7 @@ export default function Login() {
             <View style={s.dividerLine} />
           </View>
 
-          <TouchableOpacity style={s.googleBtn} onPress={loginWithGoogle} disabled={googleBusy} activeOpacity={0.85}>
+          <TouchableOpacity style={s.googleBtn} onPress={handleGoogleLogin} disabled={googleBusy} activeOpacity={0.85}>
             {googleBusy ? (
               <ActivityIndicator color={colors.text} />
             ) : (
