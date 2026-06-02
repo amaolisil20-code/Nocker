@@ -131,7 +131,7 @@ export default function Login() {
             );
             router.replace('/(tabs)/dashboard');
           }
-        } else if (result.type !== 'cancel') {
+        } else {
           Alert.alert('Erro', 'Não foi possível obter o token de acesso');
         }
       }

@@ -125,6 +125,8 @@ class GoalCreate(BaseModel):
     deadline: Optional[datetime] = None
     icon: Optional[str] = "trophy"
     color: Optional[str] = "#16A34A"
+    image_url: Optional[str] = None
+    emoji: Optional[str] = None
 
 class GoalOut(BaseModel):
     id: str
@@ -135,12 +137,17 @@ class GoalOut(BaseModel):
     deadline: Optional[datetime] = None
     icon: str
     color: str
+    image_url: Optional[str] = None
+    emoji: Optional[str] = None
     created_at: datetime
 
 class GoalUpdate(BaseModel):
     current_amount: Optional[float] = None
     target_amount: Optional[float] = None
     title: Optional[str] = None
+    image_url: Optional[str] = None
+    emoji: Optional[str] = None
+    color: Optional[str] = None
 
 class ChatRequest(BaseModel):
     message: str
@@ -311,6 +318,70 @@ def user_to_out(user: dict) -> UserOut:
         avatar_url=user.get('avatar_url'),
         created_at=user['created_at'],
     )
+
+def _extract_avatar_path_from_url(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    if value.startswith("goals/"):
+        return value
+
+    markers = [
+        "/storage/v1/object/public/avatars/",
+        "/storage/v1/object/sign/avatars/",
+        "/object/public/avatars/",
+        "/object/sign/avatars/",
+    ]
+    for marker in markers:
+        if marker in value:
+            return value.split(marker, 1)[1].split("?", 1)[0]
+    return None
+
+def _resolve_goal_image_url(value: Optional[str]) -> Optional[str]:
+    if not value or value.startswith("data:"):
+        return value
+
+    path = _extract_avatar_path_from_url(value)
+    if not path:
+        return value
+
+    try:
+        signed_result = supabase.storage.from_("avatars").create_signed_url(path, 60 * 60 * 24 * 30)
+        if isinstance(signed_result, dict):
+            data = signed_result.get("data") if isinstance(signed_result.get("data"), dict) else {}
+            signed = (
+                signed_result.get("signedUrl")
+                or signed_result.get("signedURL")
+                or data.get("signedUrl")
+                or data.get("signedURL")
+            )
+            if isinstance(signed, str):
+                if signed.startswith("http"):
+                    return signed
+                if signed.startswith("/") and SUPABASE_URL:
+                    return f"{SUPABASE_URL.rstrip('/')}{signed}"
+        elif isinstance(signed_result, str) and signed_result.startswith("http"):
+            return signed_result
+    except Exception:
+        pass
+
+    try:
+        public_result = supabase.storage.from_("avatars").get_public_url(path)
+        if isinstance(public_result, dict):
+            data = public_result.get("data") if isinstance(public_result.get("data"), dict) else {}
+            public = (
+                public_result.get("publicUrl")
+                or public_result.get("publicURL")
+                or data.get("publicUrl")
+                or data.get("publicURL")
+            )
+        else:
+            public = public_result
+        if isinstance(public, str) and public.startswith("http"):
+            return public
+    except Exception:
+        pass
+
+    return value
 
 # ---------- HEALTH ----------
 @api_router.get("/")
@@ -563,15 +634,52 @@ async def create_goal(payload: GoalCreate, current=Depends(get_current_user)):
         "deadline": payload.deadline.isoformat() if payload.deadline else None,
         "icon": payload.icon or "trophy",
         "color": payload.color or "#16A34A",
+        "image_url": payload.image_url,
+        "emoji": payload.emoji,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     supabase.table('goals').insert(doc).execute()
     return GoalOut(**doc)
 
+@api_router.post("/goals/{goal_id}/image", response_model=GoalOut)
+async def upload_goal_image(goal_id: str, file: UploadFile = File(...), current=Depends(get_current_user)):
+    # Verifica que a meta pertence ao usuário
+    res = supabase.table('goals').select('*').eq('id', goal_id).eq('user_id', current['id']).execute()
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Meta não encontrada")
+
+    allowed = {"image/jpeg", "image/png", "image/webp", "image/jpg"}
+    content_type = file.content_type or "image/jpeg"
+    if content_type not in allowed:
+        raise HTTPException(status_code=400, detail="Formato não suportado. Use JPG, PNG ou WEBP.")
+
+    content = await file.read()
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Imagem muito grande (máx 10MB)")
+
+    ext = "jpg" if "jpeg" in content_type or content_type == "image/jpg" else "png" if content_type == "image/png" else "webp"
+    path = f"goals/{current['id']}/{goal_id}.{ext}"
+
+    supabase.storage.from_("avatars").upload(
+        path,
+        content,
+        file_options={"content-type": content_type, "upsert": "true"},
+    )
+    response = supabase.table('goals').update({"image_url": path}).eq('id', goal_id).eq('user_id', current['id']).execute()
+    if not response.data:
+        raise HTTPException(status_code=404, detail="Meta não encontrada")
+
+    item = response.data[0]
+    item["image_url"] = _resolve_goal_image_url(item.get("image_url"))
+    return GoalOut(**item)
+
 @api_router.get("/goals", response_model=List[GoalOut])
 async def list_goals(current=Depends(get_current_user)):
     response = supabase.table('goals').select('*').eq('user_id', current['id']).order('created_at', desc=True).limit(100).execute()
-    return [GoalOut(**i) for i in response.data]
+    items = response.data or []
+    for item in items:
+        item["image_url"] = _resolve_goal_image_url(item.get("image_url"))
+    return [GoalOut(**i) for i in items]
 
 @api_router.patch("/goals/{goal_id}", response_model=GoalOut)
 async def update_goal(goal_id: str, payload: GoalUpdate, current=Depends(get_current_user)):

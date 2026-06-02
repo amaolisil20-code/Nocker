@@ -107,6 +107,33 @@ export const api = {
   updateGoal: (id: string, data: any) =>
     request(`/goals/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteGoal: (id: string) => request(`/goals/${id}`, { method: 'DELETE' }),
+  uploadGoalImage: async (goalId: string, uri: string) => {
+    const token = await getToken();
+    const filename = uri.split('/').pop() || 'goal.jpg';
+    const ext = filename.includes('.') ? filename.split('.').pop()?.toLowerCase() : 'jpg';
+    const type = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+    const formData = new FormData();
+    formData.append('file', { uri, name: filename.includes('.') ? filename : 'goal.jpg', type } as any);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000);
+    let res: Response;
+    try {
+      res = await fetch(`${BASE}/api/goals/${goalId}/image`, {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: formData,
+        signal: controller.signal,
+      });
+    } catch (e: any) {
+      if (e?.name === 'AbortError') throw new Error('Tempo esgotado ao enviar a imagem.');
+      throw e;
+    } finally { clearTimeout(timeout); }
+    const text = await res.text();
+    let data: any = null;
+    try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+    if (!res.ok) throw new Error((data && data.detail) || 'Erro ao enviar imagem');
+    return data;
+  },
 
   // fixed expenses
   listFixedExpenses: () => request('/fixed-expenses'),
