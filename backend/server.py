@@ -661,12 +661,15 @@ async def upload_goal_image(goal_id: str, file: UploadFile = File(...), current=
         content,
         file_options={"content-type": content_type, "upsert": "true"},
     )
-    response = supabase.table('goals').update({"image_url": path}).eq('id', goal_id).eq('user_id', current['id']).execute()
+
+    # Salva a URL pública completa diretamente no banco
+    public_url = f"{SUPABASE_URL}/storage/v1/object/public/avatars/{path}"
+
+    response = supabase.table('goals').update({"image_url": public_url}).eq('id', goal_id).eq('user_id', current['id']).execute()
     if not response.data:
         raise HTTPException(status_code=404, detail="Meta não encontrada")
 
     item = response.data[0]
-    item["image_url"] = _resolve_goal_image_url(item.get("image_url"))
     return GoalOut(**item)
 
 @api_router.get("/goals", response_model=List[GoalOut])
@@ -674,7 +677,10 @@ async def list_goals(current=Depends(get_current_user)):
     response = supabase.table('goals').select('*').eq('user_id', current['id']).order('created_at', desc=True).limit(100).execute()
     items = response.data or []
     for item in items:
-        item["image_url"] = _resolve_goal_image_url(item.get("image_url"))
+        # Compatibilidade: se ainda tem path relativo, converte para URL completa
+        img = item.get("image_url")
+        if img and not img.startswith("http") and not img.startswith("data:"):
+            item["image_url"] = f"{SUPABASE_URL}/storage/v1/object/public/avatars/{img}"
     return [GoalOut(**i) for i in items]
 
 @api_router.patch("/goals/{goal_id}", response_model=GoalOut)
