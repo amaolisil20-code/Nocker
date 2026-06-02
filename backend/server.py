@@ -337,35 +337,16 @@ def _extract_avatar_path_from_url(value: Optional[str]) -> Optional[str]:
     return None
 
 def _resolve_goal_image_url(value: Optional[str]) -> Optional[str]:
-    if not value or value.startswith("data:"):
+    if not value:
         return value
-
-    path = _extract_avatar_path_from_url(value)
-    if not path:
+    # Se já é uma URL completa, retorna direto
+    if value.startswith("http"):
         return value
-
+    # Se é um path relativo, gera URL pública
+    if value.startswith("data:"):
+        return value
     try:
-        signed_result = supabase.storage.from_("avatars").create_signed_url(path, 60 * 60 * 24 * 30)
-        if isinstance(signed_result, dict):
-            data = signed_result.get("data") if isinstance(signed_result.get("data"), dict) else {}
-            signed = (
-                signed_result.get("signedUrl")
-                or signed_result.get("signedURL")
-                or data.get("signedUrl")
-                or data.get("signedURL")
-            )
-            if isinstance(signed, str):
-                if signed.startswith("http"):
-                    return signed
-                if signed.startswith("/") and SUPABASE_URL:
-                    return f"{SUPABASE_URL.rstrip('/')}{signed}"
-        elif isinstance(signed_result, str) and signed_result.startswith("http"):
-            return signed_result
-    except Exception:
-        pass
-
-    try:
-        public_result = supabase.storage.from_("avatars").get_public_url(path)
+        public_result = supabase.storage.from_("avatars").get_public_url(value)
         if isinstance(public_result, dict):
             data = public_result.get("data") if isinstance(public_result.get("data"), dict) else {}
             public = (
@@ -380,7 +361,22 @@ def _resolve_goal_image_url(value: Optional[str]) -> Optional[str]:
             return public
     except Exception:
         pass
-
+    # Fallback: tenta signed URL
+    try:
+        path = _extract_avatar_path_from_url(value) or value
+        signed_result = supabase.storage.from_("avatars").create_signed_url(path, 60 * 60 * 24 * 365)
+        if isinstance(signed_result, dict):
+            data = signed_result.get("data") if isinstance(signed_result.get("data"), dict) else {}
+            signed = (
+                signed_result.get("signedUrl")
+                or signed_result.get("signedURL")
+                or data.get("signedUrl")
+                or data.get("signedURL")
+            )
+            if isinstance(signed, str) and signed.startswith("http"):
+                return signed
+    except Exception:
+        pass
     return value
 
 # ---------- HEALTH ----------
@@ -689,7 +685,9 @@ async def update_goal(goal_id: str, payload: GoalUpdate, current=Depends(get_cur
     response = supabase.table('goals').update(update).eq('id', goal_id).eq('user_id', current['id']).execute()
     if not response.data:
         raise HTTPException(status_code=404, detail="Meta não encontrada")
-    return GoalOut(**response.data[0])
+    item = response.data[0]
+    item["image_url"] = _resolve_goal_image_url(item.get("image_url"))
+    return GoalOut(**item)
 
 @api_router.delete("/goals/{goal_id}")
 async def delete_goal(goal_id: str, current=Depends(get_current_user)):
