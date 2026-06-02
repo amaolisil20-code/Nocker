@@ -105,14 +105,17 @@ export default function Goals() {
   const load = async () => {
     try {
       const fresh = await api.listGoals();
-      setItems(prev => fresh.map((g: any) => {
-        // Se ainda está fazendo upload, mantém a imagem local
-        if (uploadingGoalIds.current.has(g.id)) {
-          const local = prev.find(p => p.id === g.id);
-          return local ? { ...g, image_url: local.image_url } : g;
-        }
-        return g;
-      }));
+      setItems(prev => {
+        const prevMap = new Map(prev.map(p => [p.id, p]));
+        return fresh.map((g: any) => {
+          const existing = prevMap.get(g.id);
+          // Se o servidor já tem URL válida, usa ela
+          if (g.image_url && g.image_url.startsWith('http')) return g;
+          // Se o servidor não tem URL mas o local tem, mantém o local
+          if (existing?.image_url) return { ...g, image_url: existing.image_url };
+          return g;
+        });
+      });
     } catch { }
   };
   useFocusEffect(useCallback(() => { load(); }, []));
