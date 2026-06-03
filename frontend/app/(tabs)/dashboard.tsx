@@ -409,14 +409,10 @@ export default function Dashboard() {
                 data={[]}
                 incomeData={incomeLineData}
                 expenseData={expenseLineData}
-                width={W - 48}
-                height={180}
+                labels={chartLabels}
+                width={W - 76}
+                height={200}
               />
-              <View style={s.evoLabels}>
-                {visibleLabels.map((label: string, i: number) => (
-                  <Text key={i} style={s.evoLabel}>{label}</Text>
-                ))}
-              </View>
             </>
           ) : (
             <Text style={s.emptyTxt}>Sem transações neste período.</Text>
