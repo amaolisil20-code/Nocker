@@ -201,7 +201,7 @@ export default function Goals() {
         </TouchableOpacity>
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingBottom: 120, paddingTop: 14 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 100, paddingTop: 14 }} showsVerticalScrollIndicator={false}>
         {items.length === 0 && (
           <View style={styles.empty}>
             <Text style={{ fontSize: 64 }}>🏆</Text>

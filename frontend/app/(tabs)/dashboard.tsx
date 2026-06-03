@@ -271,7 +271,7 @@ export default function Dashboard() {
   return (
     <View style={s.c}>
       <ScrollView
-        contentContainerStyle={{ paddingTop: insets.top + 12, paddingBottom: 120 }}
+        contentContainerStyle={{ paddingTop: insets.top + 12, paddingBottom: insets.bottom + 100 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
         showsVerticalScrollIndicator={false}
       >

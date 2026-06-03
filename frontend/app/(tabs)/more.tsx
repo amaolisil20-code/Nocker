@@ -25,7 +25,7 @@ export default function More() {
   ];
 
   return (
-    <ScrollView style={s.c} contentContainerStyle={{ paddingTop: insets.top + 12, paddingBottom: 120, paddingHorizontal: 20 }}>
+    <ScrollView style={s.c} contentContainerStyle={{ paddingTop: insets.top + 12, paddingBottom: insets.bottom + 100, paddingHorizontal: 20 }}>
       <Text style={s.title}>{t.more}</Text>
       <Text style={s.subtitle}>Tudo sobre suas finanças em um lugar</Text>
 

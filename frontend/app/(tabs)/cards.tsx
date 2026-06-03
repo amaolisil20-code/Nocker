@@ -68,7 +68,7 @@ export default function Cards() {
         </TouchableOpacity>
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingBottom: 120, paddingTop: 6 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 100, paddingTop: 6 }} showsVerticalScrollIndicator={false}>
         {items.length === 0 && (
           <View style={s.empty}>
             <Ionicons name="card-outline" size={48} color={colors.textTertiary} />

@@ -150,7 +150,7 @@ export default function Transactions() {
       <FlatList
         data={filtered}
         keyExtractor={i => i.id}
-        contentContainerStyle={{ paddingBottom: 120, paddingTop: 6 }}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 100, paddingTop: 6 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
         renderItem={({ item }) => (
           <TouchableOpacity onLongPress={() => setActionItem(item)} activeOpacity={0.7}>

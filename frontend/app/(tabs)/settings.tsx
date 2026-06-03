@@ -628,7 +628,7 @@ export default function Settings() {
     <>
       <ScrollView
         style={s.c}
-        contentContainerStyle={{ paddingTop: insets.top + 12, paddingBottom: 120, paddingHorizontal: 20 }}
+        contentContainerStyle={{ paddingTop: insets.top + 12, paddingBottom: insets.bottom + 100, paddingHorizontal: 20 }}
       >
         {/* Header */}
         <View style={s.headerRow}>
