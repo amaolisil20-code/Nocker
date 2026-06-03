@@ -17,6 +17,9 @@ export default function Transactions() {
   const params = useLocalSearchParams<{ open?: string }>();
   const [items, setItems] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
+  const [newCatModal, setNewCatModal] = useState(false);
+  const [newCatName, setNewCatName] = useState('');
+  const [newCatSaving, setNewCatSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState<'all' | 'income' | 'expense'>('all');
   const [search, setSearch] = useState('');
@@ -62,6 +65,23 @@ export default function Transactions() {
   const onDateChange = (_: any, selected?: Date) => {
     setShowPicker(Platform.OS === 'ios');
     if (selected) setDate(selected);
+  };
+
+  const saveNewCategory = async () => {
+    if (!newCatName.trim()) return Alert.alert('Atenção', 'Digite um nome para a categoria');
+    setNewCatSaving(true);
+    try {
+      await api.createCategory({ name: newCatName.trim(), type, icon: 'pricetag', color: '#16A34A' });
+      const cats = await api.listCategories();
+      setCategories(cats);
+      setCategory(newCatName.trim());
+      setNewCatName('');
+      setNewCatModal(false);
+    } catch (e: any) {
+      Alert.alert('Erro', e.message || 'Não foi possível criar a categoria');
+    } finally {
+      setNewCatSaving(false);
+    }
   };
 
   // Abre modal para nova transação
@@ -296,10 +316,43 @@ export default function Transactions() {
               </TouchableOpacity>
             )}
 
-            <Text style={s.label}>Categoria</Text>
-            {availableCategories.length === 0 ? (
-              <Text style={s.noCatHint}>Nenhuma categoria de {type === 'expense' ? 'despesa' : 'receita'}. Crie na aba Categorias.</Text>
-            ) : (
+            <View style={s.catLabelRow}>
+              <Text style={s.label}>Categoria</Text>
+              <TouchableOpacity style={[s.addCatBtn, { backgroundColor: colors.primary }]} onPress={() => { setNewCatModal(true); setNewCatName(''); }}>
+                <Ionicons name="add" size={16} color="#fff" />
+                <Text style={s.addCatTxt}>Nova</Text>
+              </TouchableOpacity>
+            </View>
+
+            {newCatModal && (
+              <View style={[s.inlineCatBox, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+                <Text style={[s.inlineCatTitle, { color: colors.text }]}>Nova categoria de {type === 'expense' ? 'despesa' : 'receita'}</Text>
+                <TextInput
+                  placeholder="Ex: Alimentação, Salário..."
+                  placeholderTextColor={colors.textTertiary}
+                  value={newCatName}
+                  onChangeText={setNewCatName}
+                  autoFocus
+                  style={[s.miniInput, { backgroundColor: colors.bg, color: colors.text, borderColor: colors.border }]}
+                />
+                <View style={s.miniModalBtns}>
+                  <TouchableOpacity style={[s.miniCancelBtn, { borderColor: colors.border }]} onPress={() => setNewCatModal(false)}>
+                    <Text style={[s.miniCancelTxt, { color: colors.textSecondary }]}>Cancelar</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[s.miniSaveBtn, { backgroundColor: colors.primary }]} onPress={saveNewCategory} disabled={newCatSaving}>
+                    <Text style={s.miniSaveTxt}>{newCatSaving ? 'Salvando...' : 'Criar'}</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
+            {availableCategories.length === 0 && !newCatModal ? (
+              <TouchableOpacity style={[s.noCatBox, { borderColor: colors.border }]} onPress={() => setNewCatModal(true)}>
+                <Ionicons name="folder-open-outline" size={22} color={colors.textTertiary} />
+                <Text style={s.noCatHint}>Nenhuma categoria ainda</Text>
+                <Text style={[s.noCatSub, { color: colors.primary }]}>Toque aqui para criar uma</Text>
+              </TouchableOpacity>
+            ) : !newCatModal ? (
               <View style={s.catGrid}>
                 {availableCategories.map(c => (
                   <TouchableOpacity key={c} style={[s.catChip, category === c && s.catChipActive]} onPress={() => setCategory(c)}>
@@ -307,7 +360,7 @@ export default function Transactions() {
                   </TouchableOpacity>
                 ))}
               </View>
-            )}
+            ) : null}
 
             <TouchableOpacity testID="save-tx" style={s.saveBtn} onPress={save} disabled={saving}>
               <Text style={s.saveTxt}>{saving ? t.loading : (editingId ? 'Salvar alterações' : t.save)}</Text>
@@ -389,6 +442,19 @@ const makeStyles = (colors: any) => StyleSheet.create({
   confirmDateBtn: { backgroundColor: colors.primary, borderRadius: 12, height: 44,
     alignItems: 'center', justifyContent: 'center', marginTop: 8 },
   confirmDateTxt: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  catLabelRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 14, marginBottom: 8 },
+  addCatBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 99 },
+  addCatTxt: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  noCatBox: { borderWidth: 1, borderStyle: 'dashed', borderRadius: 14, padding: 16, alignItems: 'center', gap: 6 },
+  noCatSub: { fontSize: 13, fontWeight: '600' },
+  inlineCatBox: { borderRadius: 16, borderWidth: 1, padding: 14, gap: 10, marginBottom: 8 },
+  inlineCatTitle: { fontSize: 13, fontWeight: '600' },
+  miniInput: { borderRadius: 12, paddingHorizontal: 14, height: 48, borderWidth: 1, fontSize: 15 },
+  miniModalBtns: { flexDirection: 'row', gap: 10, marginTop: 4 },
+  miniCancelBtn: { flex: 1, height: 46, borderRadius: 12, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  miniCancelTxt: { fontWeight: '600', fontSize: 14 },
+  miniSaveBtn: { flex: 1, height: 46, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  miniSaveTxt: { color: '#fff', fontWeight: '700', fontSize: 14 },
   catGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   catChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, borderWidth: 1,
     borderColor: colors.border, backgroundColor: colors.surfaceElevated },
