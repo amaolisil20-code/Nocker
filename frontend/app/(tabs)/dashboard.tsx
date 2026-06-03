@@ -409,8 +409,8 @@ export default function Dashboard() {
                 data={[]}
                 incomeData={incomeLineData}
                 expenseData={expenseLineData}
-                width={W - 80}
-                height={140}
+                width={W - 48}
+                height={180}
               />
               <View style={s.evoLabels}>
                 {visibleLabels.map((label: string, i: number) => (

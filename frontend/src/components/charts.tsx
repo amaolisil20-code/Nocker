@@ -1,122 +1,204 @@
 import React from 'react';
-import { View } from 'react-native';
-import Svg, { Path, Defs, LinearGradient, Stop, Circle, G } from 'react-native-svg';
+import { View, Text } from 'react-native';
+import Svg, { Path, Defs, LinearGradient, Stop, Circle, G, Line } from 'react-native-svg';
 import { useTheme } from '../ThemeContext';
+
+const fmtK = (v: number) => {
+  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
+  if (v >= 1_000) return `${(v / 1_000).toFixed(v >= 10_000 ? 0 : 1)}k`;
+  return v.toFixed(0);
+};
+
+const niceMax = (v: number) => {
+  if (v <= 0) return 100;
+  const mag = Math.pow(10, Math.floor(Math.log10(v)));
+  const steps = [1, 1.5, 2, 2.5, 3, 4, 5, 6, 7, 8, 9, 10];
+  for (const s of steps) if (s * mag >= v) return s * mag;
+  return Math.ceil(v / mag) * mag;
+};
+
+const smoothPath = (pts: { x: number; y: number }[]) => {
+  if (pts.length < 2) return `M ${pts[0]?.x ?? 0} ${pts[0]?.y ?? 0}`;
+  return pts.reduce((acc, p, i, arr) => {
+    if (i === 0) return `M ${p.x} ${p.y}`;
+    const prev = arr[i - 1];
+    const tension = 0.35;
+    const cpx = prev.x + (p.x - prev.x) * tension;
+    return `${acc} C ${cpx} ${prev.y}, ${p.x - (p.x - prev.x) * tension} ${p.y}, ${p.x} ${p.y}`;
+  }, '');
+};
 
 type LineProps = {
   data: number[];
   width: number;
   height: number;
   stroke?: string;
-  // Nova prop: dados de duas séries independentes
   incomeData?: number[];
   expenseData?: number[];
 };
 
 export const LineChart: React.FC<LineProps> = ({ data, width, height, stroke, incomeData, expenseData }) => {
   const { colors } = useTheme();
+  const Y_AXIS_W = 40;
+  const padTop = 20;
+  const padBottom = 4;
+  const chartW = width - Y_AXIS_W - 8;
+  const chartH = height - padTop - padBottom;
+  const N_GRID = 4;
 
-  // Modo dual: duas linhas (entrada verde + saída vermelha)
   if (incomeData && expenseData) {
-    const allValues = [...incomeData, ...expenseData, 0];
-    const max = Math.max(...allValues, 1);
-    const min = Math.min(...allValues, 0);
-    const range = max - min || 1;
-    const pad = 8;
-    const len = Math.max(incomeData.length, expenseData.length);
-    const stepX = (width - pad * 2) / Math.max(len - 1, 1);
+    const allValues = [...incomeData, ...expenseData];
+    const hasData = allValues.some(v => v > 0);
+    if (!hasData) return <View style={{ width, height }} />;
 
-    const toPoints = (arr: number[]) =>
-      arr.map((v, i) => ({
-        x: pad + i * stepX,
-        y: pad + (1 - (v - min) / range) * (height - pad * 2),
-      }));
+    const maxVal = niceMax(Math.max(...allValues, 1));
+    const minVal = 0;
+    const range = maxVal - minVal;
+    const len = Math.max(incomeData.length, expenseData.length, 2);
+    const stepX = chartW / Math.max(len - 1, 1);
 
-    const buildPath = (pts: { x: number; y: number }[]) =>
-      pts.reduce((acc, p, i, arr) => {
-        if (i === 0) return `M ${p.x} ${p.y}`;
-        const prev = arr[i - 1];
-        const cx = (prev.x + p.x) / 2;
-        return `${acc} C ${cx} ${prev.y}, ${cx} ${p.y}, ${p.x} ${p.y}`;
-      }, '');
+    const toX = (i: number) => Y_AXIS_W + i * stepX;
+    const toY = (v: number) => padTop + (1 - (v - minVal) / range) * chartH;
 
-    const buildArea = (pts: { x: number; y: number }[], path: string) =>
-      `${path} L ${pts[pts.length - 1].x} ${height - pad} L ${pts[0].x} ${height - pad} Z`;
+    const incPts = incomeData.map((v, i) => ({ x: toX(i), y: toY(v) }));
+    const expPts = expenseData.map((v, i) => ({ x: toX(i), y: toY(v) }));
+    const incPath = smoothPath(incPts);
+    const expPath = smoothPath(expPts);
+    const baseY = toY(0);
 
-    const incPts = toPoints(incomeData);
-    const expPts = toPoints(expenseData);
-    const incPath = buildPath(incPts);
-    const expPath = buildPath(expPts);
-    const incArea = buildArea(incPts, incPath);
-    const expArea = buildArea(expPts, expPath);
+    const incArea = `${incPath} L ${incPts[incPts.length-1].x} ${baseY} L ${incPts[0].x} ${baseY} Z`;
+    const expArea = `${expPath} L ${expPts[expPts.length-1].x} ${baseY} L ${expPts[0].x} ${baseY} Z`;
+
+    const gridVals = Array.from({ length: N_GRID + 1 }, (_, i) => ({
+      v: (maxVal * (N_GRID - i)) / N_GRID,
+      y: toY((maxVal * (N_GRID - i)) / N_GRID),
+    }));
+
+    // Ponto mais alto da entrada
+    const incMaxVal = Math.max(...incomeData);
+    const incMaxIdx = incomeData.lastIndexOf(incMaxVal);
+    const peakX = toX(incMaxIdx);
+    const peakY = toY(incMaxVal);
+    const tooltipW = 48;
+    const tooltipX = Math.min(Math.max(peakX - tooltipW / 2, Y_AXIS_W), width - tooltipW - 4);
 
     return (
-      <Svg width={width} height={height}>
-        <Defs>
-          <LinearGradient id="lgInc" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor={colors.primary} stopOpacity="0.3" />
-            <Stop offset="1" stopColor={colors.primary} stopOpacity="0" />
-          </LinearGradient>
-          <LinearGradient id="lgExp" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor={colors.expense} stopOpacity="0.25" />
-            <Stop offset="1" stopColor={colors.expense} stopOpacity="0" />
-          </LinearGradient>
-        </Defs>
+      <View style={{ width, height }}>
+        <Svg width={width} height={height}>
+          <Defs>
+            <LinearGradient id="gi" x1="0" y1="0" x2="0" y2="1">
+              <Stop offset="0" stopColor={colors.primary} stopOpacity="0.4" />
+              <Stop offset="1" stopColor={colors.primary} stopOpacity="0.02" />
+            </LinearGradient>
+            <LinearGradient id="ge" x1="0" y1="0" x2="0" y2="1">
+              <Stop offset="0" stopColor={colors.expense} stopOpacity="0.3" />
+              <Stop offset="1" stopColor={colors.expense} stopOpacity="0.02" />
+            </LinearGradient>
+          </Defs>
 
-        {/* Áreas preenchidas */}
-        <Path d={expArea} fill="url(#lgExp)" />
-        <Path d={incArea} fill="url(#lgInc)" />
+          {/* Grid horizontal */}
+          {gridVals.map((g, i) => (
+            <Line key={i} x1={Y_AXIS_W} y1={g.y} x2={width - 4} y2={g.y}
+              stroke={colors.border} strokeWidth={i === N_GRID ? 1 : 0.5}
+              strokeDasharray={i === N_GRID ? undefined : "3,5"} opacity={i === N_GRID ? 0.8 : 0.4} />
+          ))}
 
-        {/* Linha de saída (vermelha) */}
-        <Path d={expPath} stroke={colors.expense} strokeWidth={2.5} fill="none" strokeLinecap="round" />
-        {expPts.map((p, i) => (
-          <Circle key={`e${i}`} cx={p.x} cy={p.y} r={i === expPts.length - 1 ? 4 : 0} fill={colors.expense} />
-        ))}
+          {/* Áreas */}
+          <Path d={expArea} fill="url(#ge)" />
+          <Path d={incArea} fill="url(#gi)" />
 
-        {/* Linha de entrada (verde) — renderizada por cima */}
-        <Path d={incPath} stroke={colors.primary} strokeWidth={2.5} fill="none" strokeLinecap="round" />
-        {incPts.map((p, i) => (
-          <Circle key={`i${i}`} cx={p.x} cy={p.y} r={i === incPts.length - 1 ? 4 : 0} fill={colors.primary} />
-        ))}
-      </Svg>
+          {/* Linhas */}
+          <Path d={expPath} stroke={colors.expense} strokeWidth={2} fill="none" strokeLinecap="round" strokeLinejoin="round" opacity={0.9} />
+          <Path d={incPath} stroke={colors.primary} strokeWidth={2.5} fill="none" strokeLinecap="round" strokeLinejoin="round" />
+
+          {/* Ponto final */}
+          <Circle cx={incPts[incPts.length-1].x} cy={incPts[incPts.length-1].y} r={3.5} fill={colors.primary} />
+          <Circle cx={expPts[expPts.length-1].x} cy={expPts[expPts.length-1].y} r={3} fill={colors.expense} />
+
+          {/* Tooltip pico entrada */}
+          {incMaxVal > 0 && (
+            <G>
+              <Line x1={peakX} y1={peakY + 6} x2={peakX} y2={baseY}
+                stroke={colors.primary} strokeWidth={1} strokeDasharray="2,3" opacity={0.5} />
+              <Circle cx={peakX} cy={peakY} r={5} fill={colors.primary} opacity={0.15} />
+              <Circle cx={peakX} cy={peakY} r={3.5} fill={colors.primary} />
+              <Path d={`M ${tooltipX} ${peakY - 26} h ${tooltipW} a 6 6 0 0 1 6 6 v 14 a 6 6 0 0 1 -6 6 h -${tooltipW} a 6 6 0 0 1 -6 -6 v -14 a 6 6 0 0 1 6 -6 Z`}
+                fill={colors.primary} opacity={0.95} />
+            </G>
+          )}
+        </Svg>
+
+        {/* Labels Y */}
+        <View style={{ position: 'absolute', left: 0, top: 0, width: Y_AXIS_W - 4, height }}>
+          {gridVals.filter((_, i) => i % 2 === 0).map((g, i) => (
+            <Text key={i} style={{
+              position: 'absolute', top: g.y - 7, right: 0,
+              fontSize: 9, fontWeight: '500',
+              color: colors.textTertiary, textAlign: 'right',
+            }}>{fmtK(g.v)}</Text>
+          ))}
+        </View>
+
+        {/* Label tooltip */}
+        {incMaxVal > 0 && (
+          <Text style={{
+            position: 'absolute',
+            top: peakY - 19,
+            left: tooltipX,
+            width: tooltipW,
+            fontSize: 10, fontWeight: '700',
+            color: '#fff', textAlign: 'center',
+          }}>
+            {fmtK(incMaxVal)}
+          </Text>
+        )}
+      </View>
     );
   }
 
-  // Modo legado: linha única (compatibilidade com código antigo)
+  // Modo legado: linha única
   const activeStroke = stroke || colors.primary;
   if (!data.length) return <View style={{ width, height }} />;
-  const max = Math.max(...data, 1);
-  const min = Math.min(...data, 0);
-  const range = max - min || 1;
-  const pad = 8;
-  const stepX = (width - pad * 2) / Math.max(data.length - 1, 1);
-  const points = data.map((v, i) => {
-    const x = pad + i * stepX;
-    const y = pad + (1 - (v - min) / range) * (height - pad * 2);
-    return { x, y };
-  });
-  const path = points.reduce((acc, p, i, arr) => {
-    if (i === 0) return `M ${p.x} ${p.y}`;
-    const prev = arr[i - 1];
-    const cx = (prev.x + p.x) / 2;
-    return `${acc} C ${cx} ${prev.y}, ${cx} ${p.y}, ${p.x} ${p.y}`;
-  }, '');
-  const areaPath = `${path} L ${points[points.length - 1].x} ${height - pad} L ${points[0].x} ${height - pad} Z`;
+  const maxVal = niceMax(Math.max(...data, 1));
+  const range = maxVal;
+  const stepX = chartW / Math.max(data.length - 1, 1);
+  const toY = (v: number) => padTop + (1 - v / range) * chartH;
+  const pts = data.map((v, i) => ({ x: Y_AXIS_W + i * stepX, y: toY(v) }));
+  const path = smoothPath(pts);
+  const baseY = toY(0);
+  const area = `${path} L ${pts[pts.length-1].x} ${baseY} L ${pts[0].x} ${baseY} Z`;
+  const gridVals = Array.from({ length: N_GRID + 1 }, (_, i) => ({
+    v: (maxVal * (N_GRID - i)) / N_GRID, y: toY((maxVal * (N_GRID - i)) / N_GRID),
+  }));
 
   return (
-    <Svg width={width} height={height}>
-      <Defs>
-        <LinearGradient id="lg" x1="0" y1="0" x2="0" y2="1">
-          <Stop offset="0" stopColor={activeStroke} stopOpacity="0.35" />
-          <Stop offset="1" stopColor={activeStroke} stopOpacity="0" />
-        </LinearGradient>
-      </Defs>
-      <Path d={areaPath} fill="url(#lg)" />
-      <Path d={path} stroke={activeStroke} strokeWidth={2.5} fill="none" strokeLinecap="round" />
-      {points.map((p, i) => (
-        <Circle key={i} cx={p.x} cy={p.y} r={i === points.length - 1 ? 4 : 0} fill={activeStroke} />
-      ))}
-    </Svg>
+    <View style={{ width, height }}>
+      <Svg width={width} height={height}>
+        <Defs>
+          <LinearGradient id="lg" x1="0" y1="0" x2="0" y2="1">
+            <Stop offset="0" stopColor={activeStroke} stopOpacity="0.4" />
+            <Stop offset="1" stopColor={activeStroke} stopOpacity="0.02" />
+          </LinearGradient>
+        </Defs>
+        {gridVals.map((g, i) => (
+          <Line key={i} x1={Y_AXIS_W} y1={g.y} x2={width - 4} y2={g.y}
+            stroke={colors.border} strokeWidth={i === N_GRID ? 1 : 0.5}
+            strokeDasharray={i === N_GRID ? undefined : "3,5"} opacity={i === N_GRID ? 0.8 : 0.4} />
+        ))}
+        <Path d={area} fill="url(#lg)" />
+        <Path d={path} stroke={activeStroke} strokeWidth={2.5} fill="none" strokeLinecap="round" />
+        <Circle cx={pts[pts.length-1].x} cy={pts[pts.length-1].y} r={4} fill={activeStroke} />
+      </Svg>
+      <View style={{ position: 'absolute', left: 0, top: 0, width: Y_AXIS_W - 4, height }}>
+        {gridVals.filter((_, i) => i % 2 === 0).map((g, i) => (
+          <Text key={i} style={{
+            position: 'absolute', top: g.y - 7, right: 0,
+            fontSize: 9, fontWeight: '500',
+            color: colors.textTertiary, textAlign: 'right',
+          }}>{fmtK(g.v)}</Text>
+        ))}
+      </View>
+    </View>
   );
 };
 
@@ -140,8 +222,8 @@ export const DonutChart: React.FC<DonutProps> = ({ slices, size, thickness = 18,
     const x2 = cx + radius * Math.cos(end);
     const y2 = cy + radius * Math.sin(end);
     const large = slice > Math.PI ? 1 : 0;
-    const d = `M ${x1} ${y1} A ${radius} ${radius} 0 ${large} 1 ${x2} ${y2}`;
-    return <Path key={i} d={d} stroke={s.color} strokeWidth={thickness} fill="none" strokeLinecap="round" />;
+    return <Path key={i} d={`M ${x1} ${y1} A ${radius} ${radius} 0 ${large} 1 ${x2} ${y2}`}
+      stroke={s.color} strokeWidth={thickness} fill="none" strokeLinecap="round" />;
   });
   return (
     <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
@@ -172,8 +254,8 @@ export const BarsChart: React.FC<BarProps> = ({ values, width, height }) => {
         const he = (v.expense / max) * (height - pad * 2);
         return (
           <G key={i}>
-            <Path d={`M ${xBase} ${height - pad - hi} h ${barW} v ${hi} h -${barW} Z`} fill={colors.primary} opacity={0.95} />
-            <Path d={`M ${xBase + barW + 2} ${height - pad - he} h ${barW} v ${he} h -${barW} Z`} fill={colors.expense} opacity={0.85} />
+            <Path d={`M ${xBase} ${height-pad-hi} h ${barW} v ${hi} h -${barW} Z`} fill={colors.primary} opacity={0.95} />
+            <Path d={`M ${xBase+barW+2} ${height-pad-he} h ${barW} v ${he} h -${barW} Z`} fill={colors.expense} opacity={0.85} />
           </G>
         );
       })}
