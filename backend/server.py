@@ -789,10 +789,95 @@ async def update_installment(i_id: str, payload: dict, current=Depends(get_curre
     update = {k: v for k, v in payload.items() if k in allowed and v is not None}
     if not update:
         raise HTTPException(status_code=400, detail="Nada para atualizar")
+
+    # Busca estado atual antes de atualizar (usa limit(1) em vez de .single() para evitar exceção)
+    current_res = supabase.table('installments').select('*').eq('id', i_id).eq('user_id', current['id']).limit(1).execute()
+    if not current_res.data:
+        raise HTTPException(status_code=404, detail="Parcelamento não encontrado")
+    current_item = current_res.data[0]
+    old_paid = int(current_item.get("installments_paid", 0))
+
+    # Atualiza o parcelamento
     response = supabase.table('installments').update(update).eq('id', i_id).eq('user_id', current['id']).execute()
     if not response.data:
         raise HTTPException(status_code=404, detail="Parcelamento não encontrado")
-    return InstallmentOut(**_installment_compute(response.data[0]))
+    updated_item = response.data[0]
+
+    # Se pagou exatamente +1 parcela, registra despesa automaticamente
+    new_paid = update.get("installments_paid")
+    if new_paid is not None and int(new_paid) == old_paid + 1:
+        total_amount = float(current_item["total_amount"])
+        total_installments = max(int(current_item["installments_total"]), 1)
+        monthly_amount = round(total_amount / total_installments, 2)
+        tx_doc = {
+            "id": str(uuid.uuid4()),
+            "user_id": current['id'],
+            "type": "expense",
+            "amount": monthly_amount,
+            "category": current_item["category"],
+            "description": f"{current_item['name']} — parcela {new_paid}/{current_item['installments_total']}",
+            "date": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        # Só inclui card_id se existir
+        card_id = current_item.get("card_id")
+        if card_id:
+            tx_doc["card_id"] = card_id
+        try:
+            supabase.table('transactions').insert(tx_doc).execute()
+        except Exception as e:
+            # Loga mas não bloqueia a resposta — parcela já foi marcada
+            print(f"[WARN] Falha ao criar transação para parcela: {e}")
+
+    return InstallmentOut(**_installment_compute(updated_item))
+
+
+@api_router.post("/installments/{i_id}/pay")
+async def pay_installment(i_id: str, current=Depends(get_current_user)):
+    """Marca a próxima parcela como paga e cria a transação de despesa automaticamente."""
+    # Busca o parcelamento atual
+    res = supabase.table('installments').select('*').eq('id', i_id).eq('user_id', current['id']).limit(1).execute()
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Parcelamento não encontrado")
+    item = res.data[0]
+
+    old_paid = int(item["installments_paid"])
+    total_inst = int(item["installments_total"])
+
+    if old_paid >= total_inst:
+        raise HTTPException(status_code=400, detail="Todas as parcelas já foram pagas")
+
+    new_paid = old_paid + 1
+    monthly_amount = round(float(item["total_amount"]) / max(total_inst, 1), 2)
+
+    # Atualiza o parcelamento
+    upd = supabase.table('installments').update({"installments_paid": new_paid}).eq('id', i_id).eq('user_id', current['id']).execute()
+    if not upd.data:
+        raise HTTPException(status_code=500, detail="Erro ao atualizar parcelamento")
+
+    # Cria a transação de despesa
+    tx_doc = {
+        "id": str(uuid.uuid4()),
+        "user_id": current['id'],
+        "type": "expense",
+        "amount": monthly_amount,
+        "category": item["category"],
+        "description": f"{item['name']} — parcela {new_paid}/{total_inst}",
+        "date": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if item.get("card_id"):
+        tx_doc["card_id"] = item["card_id"]
+
+    tx_res = supabase.table('transactions').insert(tx_doc).execute()
+    if not tx_res.data:
+        raise HTTPException(status_code=500, detail="Erro ao registrar transação")
+
+    return {
+        "installment": InstallmentOut(**_installment_compute(upd.data[0])),
+        "transaction": TransactionOut(**tx_res.data[0]),
+        "message": f"Parcela {new_paid}/{total_inst} registrada com sucesso",
+    }
 
 @api_router.delete("/installments/{i_id}")
 async def delete_installment(i_id: str, current=Depends(get_current_user)):

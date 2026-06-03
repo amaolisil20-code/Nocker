@@ -7,6 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api } from '../../src/api';
+import { staleWhileRevalidate } from '../../src/cache';
 import { useAuth } from '../../src/AuthContext';
 import { useTheme } from '../../src/ThemeContext';
 import { LineChart, DonutChart } from '../../src/components/charts';
@@ -184,6 +185,7 @@ export default function Dashboard() {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [notifModal, setNotifModal] = useState(false);
+  const [chartExpanded, setChartExpanded] = useState(false);
 
   const fmtBRL = (v: number) =>
     new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
@@ -220,13 +222,17 @@ export default function Dashboard() {
     }
   };
 
-  const load = async () => {
+  const load = async (background = false) => {
     try {
+      // Busca dashboard e transactions em paralelo
       const [d, txs] = await Promise.all([api.dashboard(), api.listTransactions()]);
       setData(d);
       setTransactions(txs);
+      if (!background) setLoading(false);
       await loadNotifications(d, txs);
-    } catch (e) { /* ignore */ }
+    } catch (e) {
+      if (!background) setLoading(false);
+    }
   };
 
   const openNotifications = async () => {
@@ -238,7 +244,17 @@ export default function Dashboard() {
   };
 
   useFocusEffect(useCallback(() => {
-    load().finally(() => setLoading(false));
+    // Carrega cache instantaneamente, depois atualiza em background
+    staleWhileRevalidate(
+      'dashboard_bundle',
+      () => Promise.all([api.dashboard(), api.listTransactions()]).then(([d, txs]) => ({ d, txs })),
+      ({ d, txs }, fromCache) => {
+        setData(d);
+        setTransactions(txs);
+        setLoading(false);
+        if (!fromCache) loadNotifications(d, txs);
+      },
+    ).catch(() => setLoading(false));
   }, []));
 
   const onRefresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
@@ -343,10 +359,117 @@ export default function Dashboard() {
             onPress={() => router.push({ pathname: '/(tabs)/goals', params: { open: '1' } })} />
         </View>
 
+        {/* Chart fullscreen modal */}
+        <Modal
+          visible={chartExpanded}
+          animationType="fade"
+          statusBarTranslucent
+          onRequestClose={() => setChartExpanded(false)}
+        >
+          <View style={{ flex: 1, backgroundColor: colors.bg }}>
+            {/* Modal header */}
+            <View style={{
+              flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+              paddingHorizontal: 20, paddingTop: insets.top + 14, paddingBottom: 12,
+              borderBottomWidth: 1, borderBottomColor: colors.border,
+            }}>
+              <Text style={{ color: colors.text, fontSize: 17, fontWeight: '700' }}>{t.financialEvolution}</Text>
+              <TouchableOpacity
+                onPress={() => setChartExpanded(false)}
+                style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: colors.surfaceElevated, alignItems: 'center', justifyContent: 'center' }}
+              >
+                <Ionicons name="close" size={20} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView contentContainerStyle={{ padding: 20 }} showsVerticalScrollIndicator={false}>
+              {/* Period + nav */}
+              <View style={s.periodRow}>
+                {(['day', 'week', 'month'] as Period[]).map(p => (
+                  <TouchableOpacity key={p} style={[s.periodChip, period === p && s.periodChipActive]} onPress={() => changePeriod(p)}>
+                    <Text style={[s.periodChipTxt, period === p && s.periodChipTxtActive]}>
+                      {p === 'day' ? 'Dia' : p === 'week' ? 'Semana' : 'Mês'}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <View style={s.navRow}>
+                <TouchableOpacity style={s.navBtn} onPress={() => setOffset(o => o - 1)}>
+                  <Ionicons name="chevron-back" size={18} color={colors.primary} />
+                </TouchableOpacity>
+                <Text style={s.navLabel}>{getPeriodLabel(period, offset)}</Text>
+                <TouchableOpacity style={s.navBtn} onPress={() => setOffset(o => o + 1)} disabled={isToday && period === 'day'}>
+                  <Ionicons name="chevron-forward" size={18} color={isToday && period === 'day' ? colors.border : colors.primary} />
+                </TouchableOpacity>
+              </View>
+
+              {/* Stats */}
+              <View style={s.periodStats}>
+                <View style={s.periodStat}>
+                  <Text style={s.periodStatLabel}>Entradas</Text>
+                  <Text style={[s.periodStatVal, { color: colors.primary }]}>{fmtBRL(periodStats.income)}</Text>
+                </View>
+                <View style={s.periodStatDivider} />
+                <View style={s.periodStat}>
+                  <Text style={s.periodStatLabel}>Saídas</Text>
+                  <Text style={[s.periodStatVal, { color: colors.expense }]}>{fmtBRL(periodStats.expense)}</Text>
+                </View>
+                <View style={s.periodStatDivider} />
+                <View style={s.periodStat}>
+                  <Text style={s.periodStatLabel}>Saldo</Text>
+                  <Text style={[s.periodStatVal, { color: periodStats.income - periodStats.expense >= 0 ? colors.primary : colors.expense }]}>
+                    {fmtBRL(periodStats.income - periodStats.expense)}
+                  </Text>
+                </View>
+              </View>
+
+              {(incomeLineData.some((v: number) => v !== 0) || expenseLineData.some((v: number) => v !== 0)) ? (
+                <>
+                  <View style={[s.chartLegend, { marginBottom: 14 }]}>
+                    <View style={s.legendItem}>
+                      <View style={[s.legendDot, { backgroundColor: colors.primary }]} />
+                      <Text style={s.legendTxt}>Entradas</Text>
+                    </View>
+                    <View style={s.legendItem}>
+                      <View style={[s.legendDot, { backgroundColor: colors.expense }]} />
+                      <Text style={s.legendTxt}>Saídas</Text>
+                    </View>
+                  </View>
+                  {/* Gráfico grande — ocupa a largura toda da tela menos padding */}
+                  <LineChart
+                    data={[]}
+                    incomeData={incomeLineData}
+                    expenseData={expenseLineData}
+                    labels={chartLabels}
+                    width={W - 40}
+                    height={300}
+                  />
+                  {/* Dica de toque */}
+                  <Text style={{ color: colors.textTertiary, fontSize: 11, textAlign: 'center', marginTop: 10 }}>
+                    Toque em um ponto para ver os valores detalhados
+                  </Text>
+                </>
+              ) : (
+                <Text style={s.emptyTxt}>Sem transações neste período.</Text>
+              )}
+            </ScrollView>
+          </View>
+        </Modal>
+
         {/* Evolution chart */}
         <View style={s.card}>
           <View style={s.cardHeader}>
             <Text style={s.cardTitle}>{t.financialEvolution}</Text>
+            <TouchableOpacity
+              onPress={() => setChartExpanded(true)}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 4,
+                backgroundColor: colors.surfaceElevated, paddingHorizontal: 10, paddingVertical: 5,
+                borderRadius: 10, borderWidth: 1, borderColor: colors.border }}
+            >
+              <Ionicons name="expand-outline" size={14} color={colors.primary} />
+              <Text style={{ color: colors.primary, fontSize: 11, fontWeight: '700' }}>Expandir</Text>
+            </TouchableOpacity>
           </View>
 
           {/* Period selector */}

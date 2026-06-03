@@ -4,10 +4,12 @@ import {
   KeyboardAvoidingView, Platform, Alert, Dimensions,
 } from 'react-native';
 import { useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useCachedLoad } from '../../src/useCachedLoad';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api } from '../../src/api';
+import { staleWhileRevalidate } from '../../src/cache';
 import { useTheme } from '../../src/ThemeContext';
 
 const COLORS = ['#16A34A', '#3B82F6', '#8B5CF6', '#F59E0B', '#EC4899', '#06B6D4'];
@@ -34,7 +36,7 @@ export default function Cards() {
 
   const load = async () => { try { setItems(await api.listCards()); } catch { /* ignore */ } };
 
-  useFocusEffect(useCallback(() => { load(); }, []));
+  useCachedLoad('cards_data', load, () => {});
   useEffect(() => { if (params.open) setModal(true); }, [params.open]);
 
   const save = async () => {

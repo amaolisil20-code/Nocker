@@ -4,10 +4,12 @@ import {
   KeyboardAvoidingView, Platform, Alert,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
+import { useCachedLoad } from '../../src/useCachedLoad';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api } from '../../src/api';
+import { staleWhileRevalidate } from '../../src/cache';
 import { fmtBRL } from '../../src/theme';
 import { useTheme } from '../../src/ThemeContext';
 import { SubHeader } from '../../src/components/SubHeader';
@@ -38,7 +40,7 @@ export default function Installments() {
       setCategories(cats);
     } catch { /* ignore */ }
   };
-  useFocusEffect(useCallback(() => { load(); }, []));
+  useCachedLoad('installments_data', load, () => {});
 
   const save = async () => {
     if (!name.trim()) return Alert.alert('Atenção', 'Informe o nome');
@@ -61,10 +63,44 @@ export default function Installments() {
     } catch (e: any) { Alert.alert('Erro', e.message); } finally { setSaving(false); }
   };
 
-  const payInstallment = async (item: any) => {
+  const payInstallment = (item: any) => {
     if (item.installments_paid >= item.installments_total) return;
-    await api.updateInstallment(item.id, { installments_paid: item.installments_paid + 1 });
-    await load();
+    const parcelNum = item.installments_paid + 1;
+    const valor = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(item.monthly_amount);
+    Alert.alert(
+      'Confirmar pagamento',
+      `Registrar parcela ${parcelNum}/${item.installments_total} de ${item.name}?\n\nValor: ${valor}\n\nIsso criará automaticamente uma despesa no seu extrato.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Confirmar',
+          onPress: async () => {
+            try {
+              // 1. Marca a parcela como paga
+              await api.updateInstallment(item.id, { installments_paid: parcelNum });
+
+              // 2. Cria a transação de despesa diretamente pelo frontend
+              await api.createTransaction({
+                type: 'expense',
+                amount: item.monthly_amount,
+                category: item.category,
+                description: `${item.name} — parcela ${parcelNum}/${item.installments_total}`,
+                date: new Date().toISOString(),
+              });
+
+              await load();
+              Alert.alert(
+                '✅ Parcela registrada!',
+                `${item.name} — parcela ${parcelNum}/${item.installments_total}\n${valor} adicionado às suas despesas.`,
+                [{ text: 'OK' }]
+              );
+            } catch (e: any) {
+              Alert.alert('Erro', e.message || 'Não foi possível registrar o pagamento');
+            }
+          },
+        },
+      ]
+    );
   };
 
   const remove = (id: string) =>
@@ -131,7 +167,7 @@ export default function Installments() {
             </TouchableOpacity>
           );
         })}
-        {items.length > 0 && <Text style={s.hint}>Toque para marcar parcela paga • Pressione e segure para excluir</Text>}
+        {items.length > 0 && <Text style={s.hint}>Toque para pagar parcela e registrar despesa • Pressione e segure para excluir</Text>}
       </ScrollView>
 
       <Modal visible={modal} transparent animationType="slide" onRequestClose={() => setModal(false)}>

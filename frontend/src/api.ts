@@ -2,6 +2,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const BASE = process.env.EXPO_PUBLIC_BACKEND_URL;
 
+// Acorda o servidor Railway logo ao importar a API (evita cold start)
+// Fire-and-forget — não bloqueia nada
+fetch(`${BASE}/health`, { method: 'GET' }).catch(() => {});
+
 async function authHeader() {
   const token = await AsyncStorage.getItem('nocker_token');
   return token ? { Authorization: `Bearer ${token}` } : {};
@@ -152,6 +156,8 @@ export const api = {
     request(`/installments/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteInstallment: (id: string) =>
     request(`/installments/${id}`, { method: 'DELETE' }),
+  payInstallment: (id: string) =>
+    request(`/installments/${id}/pay`, { method: 'POST' }),
 
   // subscriptions
   listSubscriptions: () => request('/subscriptions'),

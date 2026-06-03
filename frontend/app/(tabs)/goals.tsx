@@ -10,6 +10,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { api } from '../../src/api';
+import { staleWhileRevalidate, cacheSet } from '../../src/cache';
 import { fmtBRL } from '../../src/theme';
 import { useTheme } from '../../src/ThemeContext';
 
@@ -102,23 +103,33 @@ export default function Goals() {
 
   const uploadingGoalIds = useRef<Set<string>>(new Set());
 
+  const mergeGoals = (fresh: any[], prev: any[]) => {
+    const prevMap = new Map(prev.map(p => [p.id, p]));
+    return fresh.map((g: any) => {
+      const existing = prevMap.get(g.id);
+      if (g.image_url && g.image_url.startsWith('http')) return g;
+      if (existing?.image_url) return { ...g, image_url: existing.image_url };
+      return g;
+    });
+  };
+
   const load = async () => {
     try {
       const fresh = await api.listGoals();
-      setItems(prev => {
-        const prevMap = new Map(prev.map(p => [p.id, p]));
-        return fresh.map((g: any) => {
-          const existing = prevMap.get(g.id);
-          // Se o servidor já tem URL válida, usa ela
-          if (g.image_url && g.image_url.startsWith('http')) return g;
-          // Se o servidor não tem URL mas o local tem, mantém o local
-          if (existing?.image_url) return { ...g, image_url: existing.image_url };
-          return g;
-        });
-      });
+      await cacheSet('goals_list', fresh);
+      setItems(prev => mergeGoals(fresh, prev));
     } catch { }
   };
-  useFocusEffect(useCallback(() => { load(); }, []));
+
+  useFocusEffect(useCallback(() => {
+    staleWhileRevalidate(
+      'goals_list',
+      () => api.listGoals(),
+      (fresh, _fromCache) => {
+        setItems(prev => mergeGoals(fresh, prev));
+      },
+    ).catch(() => {});
+  }, []));
   useEffect(() => { if (params.open) setModal(true); }, [params.open]);
 
   const pickImage = async () => {

@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { api, setToken, clearToken, getToken } from './api';
+import { cacheSet, cacheGet } from './cache';
 
 export type User = {
   id: string;
@@ -33,13 +34,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     (async () => {
       try {
         const t = await getToken();
-        if (t) {
-          try {
-            const u = await api.me();
-            setUser(u);
-          } catch {
-            await clearToken();
-          }
+        if (!t) { setLoading(false); return; }
+
+        // 1. Carrega usuário do cache imediatamente — sem esperar a rede
+        const cached = await cacheGet<User>('user_me');
+        if (cached) {
+          setUser(cached.data);
+          setLoading(false); // libera a tela imediatamente
+        }
+
+        // 2. Valida token com o servidor em background
+        try {
+          const u = await api.me();
+          setUser(u);
+          await cacheSet('user_me', u);
+        } catch {
+          // Token inválido — limpa tudo
+          await clearToken();
+          await cacheSet('user_me', null as any);
+          setUser(null);
         }
       } finally {
         setLoading(false);
@@ -50,23 +63,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const login = async (email: string, password: string) => {
     const r = await api.login(email, password);
     await setToken(r.token);
+    await cacheSet('user_me', r.user);
     setUser(r.user);
   };
 
   const loginWithGoogle = async (google_id: string, email: string, name: string, avatar_url?: string) => {
     const r = await api.googleLogin(google_id, email, name, avatar_url);
     await setToken(r.token);
+    await cacheSet('user_me', r.user);
     setUser(r.user);
   };
 
   const register = async (name: string, email: string, password: string) => {
     const r = await api.register(name, email, password);
     await setToken(r.token);
+    await cacheSet('user_me', r.user);
     setUser(r.user);
   };
 
   const logout = async () => {
     await clearToken();
+    await cacheSet('user_me', null as any);
     setUser(null);
   };
 
@@ -74,6 +91,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const u = await api.me();
       setUser(u);
+      await cacheSet('user_me', u);
     } catch { /* ignore */ }
   };
 

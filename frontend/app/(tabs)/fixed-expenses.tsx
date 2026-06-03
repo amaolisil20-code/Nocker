@@ -4,9 +4,11 @@ import {
   KeyboardAvoidingView, Platform, Alert,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
+import { useCachedLoad } from '../../src/useCachedLoad';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api } from '../../src/api';
+import { staleWhileRevalidate } from '../../src/cache';
 import { fmtBRL } from '../../src/theme';
 import { useTheme } from '../../src/ThemeContext';
 import { SubHeader } from '../../src/components/SubHeader';
@@ -36,7 +38,7 @@ export default function FixedExpenses() {
       setCategories(cats);
     } catch { /* ignore */ }
   };
-  useFocusEffect(useCallback(() => { load(); }, []));
+  useCachedLoad('fixed_expenses_data', load, () => {});
 
   const save = async () => {
     if (!name.trim()) return Alert.alert('Atenção', 'Informe um nome');
