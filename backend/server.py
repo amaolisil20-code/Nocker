@@ -339,14 +339,37 @@ def _extract_avatar_path_from_url(value: Optional[str]) -> Optional[str]:
 def _resolve_goal_image_url(value: Optional[str]) -> Optional[str]:
     if not value:
         return value
-    # Se já é uma URL completa, retorna direto
-    if value.startswith("http"):
-        return value
-    # Se é um path relativo, gera URL pública
     if value.startswith("data:"):
         return value
+
+    path = _extract_avatar_path_from_url(value) if value.startswith("http") else value
+    if not path:
+        return value
+
+    # Tenta signed URL primeiro (funciona em bucket privado)
     try:
-        public_result = supabase.storage.from_("avatars").get_public_url(value)
+        signed_result = supabase.storage.from_("avatars").create_signed_url(path, 60 * 60 * 24 * 30)
+        if isinstance(signed_result, dict):
+            data = signed_result.get("data") if isinstance(signed_result.get("data"), dict) else {}
+            signed = (
+                signed_result.get("signedUrl")
+                or signed_result.get("signedURL")
+                or data.get("signedUrl")
+                or data.get("signedURL")
+            )
+            if isinstance(signed, str):
+                if signed.startswith("http"):
+                    return signed
+                if signed.startswith("/") and SUPABASE_URL:
+                    return f"{SUPABASE_URL.rstrip('/')}{signed}"
+        elif isinstance(signed_result, str) and signed_result.startswith("http"):
+            return signed_result
+    except Exception:
+        pass
+
+    # Fallback para bucket público
+    try:
+        public_result = supabase.storage.from_("avatars").get_public_url(path)
         if isinstance(public_result, dict):
             data = public_result.get("data") if isinstance(public_result.get("data"), dict) else {}
             public = (
@@ -361,22 +384,7 @@ def _resolve_goal_image_url(value: Optional[str]) -> Optional[str]:
             return public
     except Exception:
         pass
-    # Fallback: tenta signed URL
-    try:
-        path = _extract_avatar_path_from_url(value) or value
-        signed_result = supabase.storage.from_("avatars").create_signed_url(path, 60 * 60 * 24 * 365)
-        if isinstance(signed_result, dict):
-            data = signed_result.get("data") if isinstance(signed_result.get("data"), dict) else {}
-            signed = (
-                signed_result.get("signedUrl")
-                or signed_result.get("signedURL")
-                or data.get("signedUrl")
-                or data.get("signedURL")
-            )
-            if isinstance(signed, str) and signed.startswith("http"):
-                return signed
-    except Exception:
-        pass
+
     return value
 
 # ---------- HEALTH ----------
@@ -662,14 +670,13 @@ async def upload_goal_image(goal_id: str, file: UploadFile = File(...), current=
         file_options={"content-type": content_type, "upsert": "true"},
     )
 
-    # Salva a URL pública completa diretamente no banco
-    public_url = f"{SUPABASE_URL}/storage/v1/object/public/avatars/{path}"
-
-    response = supabase.table('goals').update({"image_url": public_url}).eq('id', goal_id).eq('user_id', current['id']).execute()
+    # Persiste o path estável; a URL de exibição é resolvida no retorno
+    response = supabase.table('goals').update({"image_url": path}).eq('id', goal_id).eq('user_id', current['id']).execute()
     if not response.data:
         raise HTTPException(status_code=404, detail="Meta não encontrada")
 
     item = response.data[0]
+    item["image_url"] = _resolve_goal_image_url(item.get("image_url"))
     return GoalOut(**item)
 
 @api_router.get("/goals", response_model=List[GoalOut])
@@ -677,10 +684,7 @@ async def list_goals(current=Depends(get_current_user)):
     response = supabase.table('goals').select('*').eq('user_id', current['id']).order('created_at', desc=True).limit(100).execute()
     items = response.data or []
     for item in items:
-        # Compatibilidade: se ainda tem path relativo, converte para URL completa
-        img = item.get("image_url")
-        if img and not img.startswith("http") and not img.startswith("data:"):
-            item["image_url"] = f"{SUPABASE_URL}/storage/v1/object/public/avatars/{img}"
+        item["image_url"] = _resolve_goal_image_url(item.get("image_url"))
     return [GoalOut(**i) for i in items]
 
 @api_router.patch("/goals/{goal_id}", response_model=GoalOut)

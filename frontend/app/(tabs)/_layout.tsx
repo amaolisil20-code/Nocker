@@ -3,9 +3,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { View, Platform } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { useTheme } from '../../src/ThemeContext';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function TabsLayout() {
   const { colors, themeMode, t } = useTheme();
+  const insets = useSafeAreaInsets();
   return (
     <Tabs
       screenOptions={{
@@ -17,8 +19,8 @@ export default function TabsLayout() {
           backgroundColor: themeMode === 'dark' ? 'rgba(10,10,10,0.92)' : 'rgba(245,245,245,0.92)',
           borderTopColor: colors.border,
           borderTopWidth: 0.5,
-          height: Platform.OS === 'ios' ? 86 : 68,
-          paddingBottom: Platform.OS === 'ios' ? 28 : 10,
+          height: Platform.OS === 'ios' ? 86 : 58 + insets.bottom,
+          paddingBottom: Platform.OS === 'ios' ? 28 : insets.bottom + 6,
           paddingTop: 10,
         },
         tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
