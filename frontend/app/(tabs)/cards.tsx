@@ -30,14 +30,113 @@ export default function Cards() {
   const [due, setDue] = useState('15');
   const [color, setColor] = useState(COLORS[0]);
   const [saving, setSaving] = useState(false);
+  const [bankModal, setBankModal] = useState(false);
+  const [bankSearch, setBankSearch] = useState('');
+  const [institutions, setInstitutions] = useState<any[]>([]);
+  const [connections, setConnections] = useState<any[]>([]);
+  const [openFinanceMode, setOpenFinanceMode] = useState<'real' | 'mock'>('mock');
+  const [openFinanceProvider, setOpenFinanceProvider] = useState<string>('mock');
+  const [openFinanceReason, setOpenFinanceReason] = useState<string | null>(null);
+  const [providerItemId, setProviderItemId] = useState('');
+  const [loadingInstitutions, setLoadingInstitutions] = useState(false);
+  const [loadingConnections, setLoadingConnections] = useState(false);
+  const [connectingBankId, setConnectingBankId] = useState<string | null>(null);
+  const [syncingConnectionId, setSyncingConnectionId] = useState<string | null>(null);
 
   const fmtBRL = (v: number) =>
     new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
 
-  const load = async () => { try { setItems(await api.listCards()); } catch { /* ignore */ } };
+  const load = async () => {
+    try {
+      const [cards, connected, ofStatus] = await Promise.all([
+        api.listCards(),
+        api.listOpenFinanceConnections().catch(() => []),
+        api.getOpenFinanceStatus?.().catch(() => ({ mode: 'mock', provider: 'mock', fallback_reason: null })),
+      ]);
+      setItems(cards);
+      setConnections(connected || []);
+      setOpenFinanceMode(ofStatus?.mode === 'real' ? 'real' : 'mock');
+      setOpenFinanceProvider(ofStatus?.provider || 'mock');
+      setOpenFinanceReason(ofStatus?.fallback_reason || null);
+    } catch {
+      /* ignore */
+    }
+  };
 
   useCachedLoad('cards_data', load, () => {});
   useEffect(() => { if (params.open) setModal(true); }, [params.open]);
+
+  const openBankConnect = async () => {
+    setBankModal(true);
+    if (institutions.length > 0) return;
+    setLoadingInstitutions(true);
+    try {
+      const rows = await api.listOpenFinanceInstitutions();
+      setInstitutions(rows || []);
+    } catch (e: any) {
+      Alert.alert('Erro', e.message || 'Não foi possível carregar instituições.');
+    } finally {
+      setLoadingInstitutions(false);
+    }
+  };
+
+  const connectInstitution = async (institution: any) => {
+    if (openFinanceMode === 'real' && openFinanceProvider === 'pluggy' && !providerItemId.trim()) {
+      return Alert.alert('Item ID obrigatório', 'Informe o itemId do Pluggy para conexão real.');
+    }
+    setConnectingBankId(institution.id);
+    try {
+      await api.connectOpenFinanceBank(
+        institution.id,
+        institution.name,
+        openFinanceMode === 'real' && openFinanceProvider === 'pluggy' ? providerItemId.trim() : undefined
+      );
+      setBankModal(false);
+      setBankSearch('');
+      setProviderItemId('');
+      await load();
+      Alert.alert('Conectado', `${institution.name} conectado com sucesso.`);
+    } catch (e: any) {
+      Alert.alert('Erro', e.message || 'Não foi possível conectar o banco.');
+    } finally {
+      setConnectingBankId(null);
+    }
+  };
+
+  const syncConnection = async (connectionId: string) => {
+    setSyncingConnectionId(connectionId);
+    try {
+      await api.syncOpenFinanceConnection(connectionId);
+      await load();
+      Alert.alert('Sincronizado', 'Dados atualizados com sucesso.');
+    } catch (e: any) {
+      Alert.alert('Erro', e.message || 'Falha ao sincronizar conexão.');
+    } finally {
+      setSyncingConnectionId(null);
+    }
+  };
+
+  const disconnectConnection = async (connectionId: string, institutionName: string) => {
+    Alert.alert('Desconectar', `Desconectar ${institutionName}?`, [
+      { text: 'Cancelar' },
+      {
+        text: 'Desconectar',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await api.disconnectOpenFinanceConnection(connectionId);
+            await load();
+          } catch (e: any) {
+            Alert.alert('Erro', e.message || 'Não foi possível desconectar.');
+          }
+        },
+      },
+    ]);
+  };
+
+  const filteredInstitutions = institutions.filter((i) =>
+    (i.name || '').toLowerCase().includes(bankSearch.trim().toLowerCase())
+  );
 
   const save = async () => {
     if (!name.trim()) return Alert.alert('Atenção', 'Nome do cartão');
@@ -65,12 +164,72 @@ export default function Cards() {
     <View style={[s.c, { paddingTop: insets.top + 12 }]}>
       <View style={s.headerRow}>
         <Text style={s.title}>{t.cards}</Text>
-        <TouchableOpacity testID="add-card" style={s.addBtn} onPress={() => setModal(true)}>
+        <TouchableOpacity
+          testID="add-card"
+          style={s.addBtn}
+          onPress={() => {
+            Alert.alert('Adicionar', 'Escolha como deseja adicionar', [
+              { text: 'Conectar banco', onPress: openBankConnect },
+              { text: 'Cartão manual', onPress: () => setModal(true) },
+              { text: 'Cancelar', style: 'cancel' },
+            ]);
+          }}
+        >
           <Ionicons name="add" size={22} color="#fff" />
         </TouchableOpacity>
       </View>
 
       <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 100, paddingTop: 6 }} showsVerticalScrollIndicator={false}>
+        <View style={s.connCard}>
+          <View style={s.connHeader}>
+            <Text style={s.connTitle}>Contas conectadas</Text>
+            <TouchableOpacity onPress={openBankConnect} style={s.linkBtn}>
+              <Text style={s.linkBtnText}>Conectar banco</Text>
+            </TouchableOpacity>
+          </View>
+
+          {openFinanceMode !== 'real' && (
+            <View style={s.demoWarning}>
+              <Text style={s.demoWarningTitle}>Modo demonstração ativo</Text>
+              <Text style={s.demoWarningText}>
+                PIX e transações reais ainda não são importados automaticamente.
+              </Text>
+              {!!openFinanceReason && <Text style={s.demoWarningReason}>{openFinanceReason}</Text>}
+            </View>
+          )}
+
+          {connections.length === 0 ? (
+            <Text style={s.connEmpty}>Nenhuma conta conectada ainda.</Text>
+          ) : (
+            connections.map((entry: any) => {
+              const conn = entry.connection || entry;
+              const accounts = entry.accounts || [];
+              const cards = entry.cards || [];
+              return (
+                <View key={conn.id} style={s.connItem}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.connBank}>{conn.institution_name}</Text>
+                    <Text style={s.connMeta}>
+                      {accounts.length} conta(s) • {cards.length} cartão(ões) • {conn.status}
+                    </Text>
+                    <Text style={s.connMetaSmall}>
+                      Última sync: {conn.last_sync ? new Date(conn.last_sync).toLocaleString('pt-BR') : 'Nunca'}
+                    </Text>
+                  </View>
+                  <View style={s.connActions}>
+                    <TouchableOpacity onPress={() => syncConnection(conn.id)}>
+                      <Text style={s.connActionTxt}>{syncingConnectionId === conn.id ? 'Sync...' : 'Atualizar'}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => disconnectConnection(conn.id, conn.institution_name)}>
+                      <Text style={[s.connActionTxt, { color: '#EF4444' }]}>Desconectar</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              );
+            })
+          )}
+        </View>
+
         {items.length === 0 && (
           <View style={s.empty}>
             <Ionicons name="card-outline" size={48} color={colors.textTertiary} />
@@ -117,6 +276,58 @@ export default function Cards() {
           );
         })}
       </ScrollView>
+
+      <Modal visible={bankModal} transparent animationType="slide" onRequestClose={() => setBankModal(false)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.modalRoot}>
+          <TouchableOpacity style={{ flex: 1 }} onPress={() => setBankModal(false)} />
+          <ScrollView style={s.sheet} contentContainerStyle={{ paddingBottom: 24 }} keyboardShouldPersistTaps="handled">
+            <View style={s.sheetHandle} />
+            <Text style={s.sheetTitle}>Conectar instituição</Text>
+
+            <TextInput
+              placeholder="Buscar banco"
+              placeholderTextColor={colors.textTertiary}
+              value={bankSearch}
+              onChangeText={setBankSearch}
+              style={s.input}
+            />
+
+            {openFinanceMode === 'real' && openFinanceProvider === 'pluggy' && (
+              <>
+                <Text style={s.label}>Item ID Pluggy (real)</Text>
+                <TextInput
+                  placeholder="Ex: 5f2c3..."
+                  placeholderTextColor={colors.textTertiary}
+                  value={providerItemId}
+                  onChangeText={setProviderItemId}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  style={s.input}
+                />
+                <Text style={s.connMetaSmall}>Use o itemId gerado no fluxo Connect do Pluggy.</Text>
+              </>
+            )}
+
+            {loadingInstitutions ? (
+              <Text style={s.connEmpty}>Carregando instituições...</Text>
+            ) : filteredInstitutions.length === 0 ? (
+              <Text style={s.connEmpty}>Nenhuma instituição encontrada.</Text>
+            ) : (
+              filteredInstitutions.map((inst) => (
+                <TouchableOpacity
+                  key={inst.id}
+                  style={s.bankItem}
+                  onPress={() => connectInstitution(inst)}
+                  disabled={connectingBankId === inst.id}
+                >
+                  <Text style={s.bankName}>{inst.name}</Text>
+                  <Text style={s.bankAction}>{connectingBankId === inst.id ? 'Conectando...' : 'Conectar'}</Text>
+                </TouchableOpacity>
+              ))
+            )}
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </Modal>
 
       <Modal visible={modal} transparent animationType="slide" onRequestClose={() => setModal(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.modalRoot}>
@@ -179,6 +390,51 @@ const makeStyles = (colors: any) => StyleSheet.create({
   headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
   title: { color: colors.text, fontSize: 26, fontWeight: '800', letterSpacing: -0.5 },
   addBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+  connCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 14,
+    marginBottom: 12,
+  },
+  connHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  connTitle: { color: colors.text, fontSize: 15, fontWeight: '700' },
+  linkBtn: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, backgroundColor: colors.surfaceElevated },
+  linkBtnText: { color: colors.primary, fontWeight: '700', fontSize: 12 },
+  demoWarning: {
+    borderWidth: 1,
+    borderColor: '#F59E0B66',
+    backgroundColor: '#F59E0B1A',
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    marginBottom: 8,
+  },
+  demoWarningTitle: { color: '#F59E0B', fontWeight: '700', fontSize: 12 },
+  demoWarningText: { color: colors.textSecondary, fontSize: 12, marginTop: 2 },
+  demoWarningReason: { color: colors.textTertiary, fontSize: 11, marginTop: 4 },
+  connEmpty: { color: colors.textSecondary, fontSize: 13, paddingVertical: 8 },
+  connItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10, borderTopWidth: 1, borderTopColor: colors.border },
+  connBank: { color: colors.text, fontSize: 14, fontWeight: '700' },
+  connMeta: { color: colors.textSecondary, fontSize: 12, marginTop: 2 },
+  connMetaSmall: { color: colors.textTertiary, fontSize: 11, marginTop: 2 },
+  connActions: { gap: 10, alignItems: 'flex-end' },
+  connActionTxt: { color: colors.primary, fontWeight: '700', fontSize: 12 },
+  bankItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceElevated,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    marginTop: 10,
+  },
+  bankName: { color: colors.text, fontSize: 14, fontWeight: '600' },
+  bankAction: { color: colors.primary, fontSize: 12, fontWeight: '700' },
   cardBox: { borderRadius: 24, padding: 22, marginVertical: 10, borderWidth: 1, overflow: 'hidden',
     backgroundColor: colors.surface, minHeight: 210 },
   cardGlow: { position: 'absolute', top: -50, right: -50, width: 160, height: 160, borderRadius: 80 },

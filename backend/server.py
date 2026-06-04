@@ -6,8 +6,11 @@ import os
 import logging
 import json
 import ast
+import base64
+import hashlib
 import bcrypt
 import jwt
+import requests
 from pathlib import Path
 from pydantic import BaseModel, Field, EmailStr
 from typing import List, Optional, Literal
@@ -33,6 +36,13 @@ JWT_ALG = 'HS256'
 JWT_EXP_HOURS = 24 * 30
 
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
+OPEN_FINANCE_PROVIDER = os.environ.get('OPEN_FINANCE_PROVIDER', 'mock').lower()
+OPEN_FINANCE_SYNC_ON_OPEN = os.environ.get('OPEN_FINANCE_SYNC_ON_OPEN', 'true').lower() == 'true'
+
+PLUGGY_BASE_URL = os.environ.get('PLUGGY_BASE_URL', 'https://api.pluggy.ai')
+PLUGGY_CLIENT_ID = os.environ.get('PLUGGY_CLIENT_ID', '')
+PLUGGY_CLIENT_SECRET = os.environ.get('PLUGGY_CLIENT_SECRET', '')
+OF_TOKEN_KEY = os.environ.get('OF_TOKEN_KEY', '')
 
 app = FastAPI(title="Nocker API")
 api_router = APIRouter(prefix="/api")
@@ -246,6 +256,60 @@ class CategoryOut(BaseModel):
     color: str
     icon: str
     created_at: datetime
+
+# ---------- OPEN FINANCE MODELS ----------
+
+BankConnectionStatus = Literal['connected', 'syncing', 'error', 'reauth_required']
+
+class BankInstitutionOut(BaseModel):
+    id: str
+    name: str
+    provider: str = 'pluggy'
+    logo_url: Optional[str] = None
+
+class BankConnectRequest(BaseModel):
+    institution_id: str
+    institution_name: Optional[str] = None
+    provider_item_id: Optional[str] = None
+
+class BankConnectionOut(BaseModel):
+    id: str
+    user_id: str
+    institution_id: str
+    institution_name: str
+    status: BankConnectionStatus
+    last_sync: Optional[datetime] = None
+    created_at: datetime
+
+class BankAccountOut(BaseModel):
+    id: str
+    connection_id: str
+    account_name: str
+    account_type: str
+    balance: float
+    currency: str = 'BRL'
+
+class BankCardOut(BaseModel):
+    id: str
+    connection_id: str
+    card_name: str
+    card_brand: str
+    limit_total: float
+    limit_available: float
+    invoice_amount: float
+    due_date: Optional[str] = None
+
+class BankConnectionDetailsOut(BaseModel):
+    connection: BankConnectionOut
+    accounts: List[BankAccountOut]
+    cards: List[BankCardOut]
+
+class OpenFinanceStatusOut(BaseModel):
+    mode: Literal['real', 'mock']
+    provider: str
+    provider_configured: bool
+    sync_on_open: bool
+    fallback_reason: Optional[str] = None
 
 # ---------- FINANCIAL SETTINGS MODELS ----------
 
@@ -476,6 +540,354 @@ def _resolve_goal_image_url(value: Optional[str]) -> Optional[str]:
         pass
 
     return value
+
+OPEN_FINANCE_INSTITUTIONS = [
+    {"id": "nubank", "name": "Nubank"},
+    {"id": "inter", "name": "Banco Inter"},
+    {"id": "itau", "name": "Itaú"},
+    {"id": "bradesco", "name": "Bradesco"},
+    {"id": "santander", "name": "Santander"},
+    {"id": "bb", "name": "Banco do Brasil"},
+    {"id": "caixa", "name": "Caixa"},
+    {"id": "c6", "name": "C6 Bank"},
+    {"id": "neon", "name": "Neon"},
+    {"id": "mercado_pago", "name": "Mercado Pago"},
+]
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+def _safe_float(value: object, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return default
+
+def _normalize_of_status(value: Optional[str]) -> BankConnectionStatus:
+    status = (value or "connected").lower()
+    if status in ("connected", "syncing", "error", "reauth_required"):
+        return status  # type: ignore[return-value]
+    if status in ("warning", "login_error", "item_error"):
+        return "reauth_required"
+    return "connected"
+
+def _open_finance_provider_ready() -> bool:
+    if OPEN_FINANCE_PROVIDER == "pluggy":
+        return bool(PLUGGY_CLIENT_ID and PLUGGY_CLIENT_SECRET)
+    return OPEN_FINANCE_PROVIDER not in ("", "mock")
+
+def _open_finance_status_payload() -> OpenFinanceStatusOut:
+    ready = _open_finance_provider_ready()
+    mode: Literal['real', 'mock'] = 'real' if ready else 'mock'
+    fallback_reason = None
+    if mode == 'mock':
+        if OPEN_FINANCE_PROVIDER == 'pluggy' and not ready:
+            fallback_reason = 'Pluggy não configurado (PLUGGY_CLIENT_ID/PLUGGY_CLIENT_SECRET)'
+        elif OPEN_FINANCE_PROVIDER == 'mock':
+            fallback_reason = 'OPEN_FINANCE_PROVIDER=mock'
+        else:
+            fallback_reason = 'Provedor Open Finance sem configuração válida'
+
+    return OpenFinanceStatusOut(
+        mode=mode,
+        provider=OPEN_FINANCE_PROVIDER,
+        provider_configured=ready,
+        sync_on_open=OPEN_FINANCE_SYNC_ON_OPEN,
+        fallback_reason=fallback_reason,
+    )
+
+def _of_crypto_key() -> bytes:
+    seed = OF_TOKEN_KEY or JWT_SECRET or "nocker-open-finance"
+    digest = hashlib.sha256(seed.encode()).digest()
+    return base64.urlsafe_b64encode(digest)
+
+def _encrypt_secret(value: str) -> str:
+    try:
+        from cryptography.fernet import Fernet
+        return Fernet(_of_crypto_key()).encrypt(value.encode()).decode()
+    except Exception:
+        return value
+
+def _decrypt_secret(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return value
+    try:
+        from cryptography.fernet import Fernet
+        return Fernet(_of_crypto_key()).decrypt(value.encode()).decode()
+    except Exception:
+        return value
+
+def _classify_category(description: str, amount: float) -> str:
+    d = (description or "").lower()
+    rules = [
+        ("mercado|ifood|restaurante|padaria|açougue|supermercado", "Alimentação"),
+        ("uber|99|combust|posto|estacionamento|metro|onibus", "Transporte"),
+        ("farmacia|hospital|clinica|medic", "Saúde"),
+        ("aluguel|condominio|energia|luz|agua|gas|internet|moradia", "Moradia"),
+        ("netflix|spotify|prime|disney|assinatura", "Assinaturas"),
+        ("cinema|bar|lazer|show|stream", "Lazer"),
+        ("salario|folha|pagamento empresa", "Salário"),
+        ("ted|doc|pix|transfer", "Transferências"),
+        ("curso|faculdade|escola|educ", "Educação"),
+        ("invest|corretora|tesouro|cdb|fii", "Investimentos"),
+    ]
+    for pattern, category in rules:
+        import re
+        if re.search(pattern, d):
+            return category
+    return "Compras" if amount < 0 else "Receitas"
+
+def _tx_type_from_amount(amount: float) -> str:
+    return "income" if amount >= 0 else "expense"
+
+def _pluggy_headers() -> dict:
+    if not PLUGGY_CLIENT_ID or not PLUGGY_CLIENT_SECRET:
+        raise HTTPException(status_code=503, detail="Pluggy não configurado")
+
+    auth = requests.post(
+        f"{PLUGGY_BASE_URL.rstrip('/')}/auth",
+        json={"clientId": PLUGGY_CLIENT_ID, "clientSecret": PLUGGY_CLIENT_SECRET},
+        timeout=20,
+    )
+    if auth.status_code >= 300:
+        raise HTTPException(status_code=502, detail="Falha ao autenticar no provedor Open Finance")
+    data = auth.json()
+    token = data.get("apiKey") or data.get("accessToken")
+    if not token:
+        raise HTTPException(status_code=502, detail="Token do provedor Open Finance inválido")
+    return {"X-API-KEY": token, "Content-Type": "application/json"}
+
+def _pluggy_request(method: str, path: str, payload: Optional[dict] = None) -> dict:
+    headers = _pluggy_headers()
+    url = f"{PLUGGY_BASE_URL.rstrip('/')}{path}"
+    res = requests.request(method, url, headers=headers, json=payload, timeout=30)
+    if res.status_code >= 300:
+        raise HTTPException(status_code=502, detail=f"Erro no provedor Open Finance: {res.text[:180]}")
+    return res.json() if res.text else {}
+
+def _upsert_bank_account(connection_id: str, account: dict) -> None:
+    account_id = account["id"]
+    now = _now_iso()
+    existing = supabase.table("bank_accounts").select("id").eq("id", account_id).execute()
+    payload = {
+        "id": account_id,
+        "connection_id": connection_id,
+        "account_name": account.get("account_name") or "Conta",
+        "account_type": account.get("account_type") or "checking",
+        "balance": _safe_float(account.get("balance")),
+        "currency": account.get("currency") or "BRL",
+        "updated_at": now,
+    }
+    if existing.data:
+        supabase.table("bank_accounts").update(payload).eq("id", account_id).execute()
+    else:
+        payload["created_at"] = now
+        supabase.table("bank_accounts").insert(payload).execute()
+
+def _upsert_bank_card(connection_id: str, card: dict) -> None:
+    card_id = card["id"]
+    now = _now_iso()
+    existing = supabase.table("bank_cards").select("id").eq("id", card_id).execute()
+    payload = {
+        "id": card_id,
+        "connection_id": connection_id,
+        "card_name": card.get("card_name") or "Cartão",
+        "card_brand": card.get("card_brand") or "visa",
+        "limit_total": _safe_float(card.get("limit_total")),
+        "limit_available": _safe_float(card.get("limit_available")),
+        "invoice_amount": _safe_float(card.get("invoice_amount")),
+        "due_date": card.get("due_date"),
+        "updated_at": now,
+    }
+    if existing.data:
+        supabase.table("bank_cards").update(payload).eq("id", card_id).execute()
+    else:
+        payload["created_at"] = now
+        supabase.table("bank_cards").insert(payload).execute()
+
+def _upsert_transaction_from_bank(user_id: str, account_id: Optional[str], tx: dict) -> None:
+    tx_id = tx["id"]
+    amount = _safe_float(tx.get("amount"))
+    tx_type = _tx_type_from_amount(amount)
+    abs_amount = abs(amount)
+    description = tx.get("description") or "Transação bancária"
+    date_str = tx.get("transaction_date") or _now_iso()
+    category = tx.get("category") or _classify_category(description, amount)
+
+    link = supabase.table("bank_transaction_links").select("id,transaction_id").eq("id", tx_id).execute()
+    if link.data:
+        tr_id = link.data[0]["transaction_id"]
+        supabase.table("transactions").update({
+            "description": description,
+            "amount": abs_amount,
+            "type": tx_type,
+            "category": category,
+            "date": date_str,
+        }).eq("id", tr_id).eq("user_id", user_id).execute()
+        return
+
+    created_at = _now_iso()
+    tx_row = {
+        "id": str(uuid.uuid4()),
+        "user_id": user_id,
+        "type": tx_type,
+        "amount": abs_amount,
+        "category": category,
+        "description": description,
+        "date": date_str,
+        "card_id": None,
+        "created_at": created_at,
+    }
+    supabase.table("transactions").insert(tx_row).execute()
+    supabase.table("bank_transaction_links").insert({
+        "id": tx_id,
+        "transaction_id": tx_row["id"],
+        "user_id": user_id,
+        "bank_account_id": account_id,
+        "created_at": created_at,
+    }).execute()
+
+def _mock_accounts_for_connection(connection: dict) -> List[dict]:
+    prefix = connection["id"][:8]
+    return [
+        {
+            "id": f"acc-{prefix}-001",
+            "account_name": "Conta Corrente",
+            "account_type": "checking",
+            "balance": 3520.74,
+            "currency": "BRL",
+        },
+        {
+            "id": f"acc-{prefix}-002",
+            "account_name": "Conta Poupança",
+            "account_type": "savings",
+            "balance": 12800.10,
+            "currency": "BRL",
+        },
+    ]
+
+def _mock_cards_for_connection(connection: dict) -> List[dict]:
+    prefix = connection["id"][:8]
+    return [
+        {
+            "id": f"card-{prefix}-001",
+            "card_name": f"{connection['institution_name']} Platinum",
+            "card_brand": "visa",
+            "limit_total": 9000.0,
+            "limit_available": 5400.0,
+            "invoice_amount": 3600.0,
+            "due_date": "15",
+        }
+    ]
+
+def _mock_transactions_for_connection(connection: dict, account_id: str) -> List[dict]:
+    now = datetime.now(timezone.utc)
+    base = connection["id"][:8]
+    return [
+        {
+            "id": f"tx-{base}-001",
+            "description": "PIX recebido Salário",
+            "amount": 4200.00,
+            "transaction_date": (now - timedelta(days=2)).isoformat(),
+            "category": "Salário",
+        },
+        {
+            "id": f"tx-{base}-002",
+            "description": "Supermercado",
+            "amount": -289.30,
+            "transaction_date": (now - timedelta(days=1)).isoformat(),
+            "category": "Alimentação",
+        },
+        {
+            "id": f"tx-{base}-003",
+            "description": "Uber",
+            "amount": -42.55,
+            "transaction_date": now.isoformat(),
+            "category": "Transporte",
+        },
+    ]
+
+def _sync_open_finance_connection(connection: dict, user_id: str) -> None:
+    now = _now_iso()
+    supabase.table("bank_connections").update({"status": "syncing", "updated_at": now}).eq("id", connection["id"]).execute()
+    try:
+        if OPEN_FINANCE_PROVIDER == "pluggy" and PLUGGY_CLIENT_ID and PLUGGY_CLIENT_SECRET:
+            provider_item_id = _decrypt_secret(connection.get("provider_item_id")) or ""
+            if not provider_item_id:
+                raise HTTPException(status_code=400, detail="Conexão sem item do provedor")
+
+            account_payload = _pluggy_request("GET", f"/accounts?itemId={provider_item_id}")
+            card_payload = _pluggy_request("GET", f"/accounts?itemId={provider_item_id}&type=CREDIT")
+            tx_payload = _pluggy_request("GET", f"/transactions?itemId={provider_item_id}&pageSize=300")
+
+            accounts_data = account_payload.get("results") or account_payload.get("data") or []
+            cards_data = card_payload.get("results") or card_payload.get("data") or []
+            tx_data = tx_payload.get("results") or tx_payload.get("data") or []
+
+            normalized_accounts = [
+                {
+                    "id": f"acc-{a.get('id')}",
+                    "account_name": a.get("name") or "Conta",
+                    "account_type": (a.get("type") or "checking").lower(),
+                    "balance": _safe_float(a.get("balance")),
+                    "currency": a.get("currencyCode") or "BRL",
+                }
+                for a in accounts_data
+            ]
+            normalized_cards = [
+                {
+                    "id": f"card-{c.get('id')}",
+                    "card_name": c.get("name") or "Cartão",
+                    "card_brand": (c.get("subtype") or "visa").lower(),
+                    "limit_total": _safe_float(c.get("creditData", {}).get("limit")),
+                    "limit_available": _safe_float(c.get("creditData", {}).get("availableLimit")),
+                    "invoice_amount": _safe_float(c.get("creditData", {}).get("usedLimit")),
+                    "due_date": str(c.get("creditData", {}).get("closeDay") or ""),
+                }
+                for c in cards_data
+            ]
+            normalized_txs = [
+                {
+                    "id": f"plg-{t.get('id')}",
+                    "description": t.get("description") or "Transação",
+                    "amount": _safe_float(t.get("amount")),
+                    "transaction_date": t.get("date") or now,
+                    "category": _classify_category(t.get("description") or "", _safe_float(t.get("amount"))),
+                }
+                for t in tx_data
+            ]
+        else:
+            normalized_accounts = _mock_accounts_for_connection(connection)
+            normalized_cards = _mock_cards_for_connection(connection)
+            normalized_txs = _mock_transactions_for_connection(connection, normalized_accounts[0]["id"]) if normalized_accounts else []
+
+        for account in normalized_accounts:
+            _upsert_bank_account(connection["id"], account)
+        for card in normalized_cards:
+            _upsert_bank_card(connection["id"], card)
+        for tx in normalized_txs:
+            _upsert_transaction_from_bank(user_id, normalized_accounts[0]["id"] if normalized_accounts else None, tx)
+
+        supabase.table("bank_connections").update({
+            "status": "connected",
+            "last_sync": _now_iso(),
+            "updated_at": _now_iso(),
+            "last_error": None,
+        }).eq("id", connection["id"]).execute()
+    except HTTPException as e:
+        supabase.table("bank_connections").update({
+            "status": "error",
+            "last_error": e.detail,
+            "updated_at": _now_iso(),
+        }).eq("id", connection["id"]).execute()
+        raise
+    except Exception as e:
+        supabase.table("bank_connections").update({
+            "status": "error",
+            "last_error": str(e),
+            "updated_at": _now_iso(),
+        }).eq("id", connection["id"]).execute()
+        raise HTTPException(status_code=500, detail="Falha ao sincronizar conexão bancária")
 
 # ---------- HEALTH ----------
 @api_router.get("/")
@@ -713,6 +1125,142 @@ async def delete_card(card_id: str, current=Depends(get_current_user)):
     response = supabase.table('cards').delete().eq('id', card_id).eq('user_id', current['id']).execute()
     if not response.data:
         raise HTTPException(status_code=404, detail="Cartão não encontrado")
+    return {"ok": True}
+
+# ---------- OPEN FINANCE ----------
+@api_router.get("/open-finance/status", response_model=OpenFinanceStatusOut)
+async def open_finance_status(current=Depends(get_current_user)):
+    return _open_finance_status_payload()
+
+@api_router.get("/open-finance/institutions", response_model=List[BankInstitutionOut])
+async def list_open_finance_institutions(current=Depends(get_current_user)):
+    if OPEN_FINANCE_PROVIDER == "pluggy" and PLUGGY_CLIENT_ID and PLUGGY_CLIENT_SECRET:
+        try:
+            payload = _pluggy_request("GET", "/institutions")
+            rows = payload.get("results") or payload.get("data") or []
+            out = []
+            for row in rows:
+                out.append(BankInstitutionOut(
+                    id=str(row.get("id") or row.get("itemId") or row.get("name", "").lower().replace(" ", "_")),
+                    name=row.get("name") or "Instituição",
+                    provider="pluggy",
+                    logo_url=row.get("imageUrl") or row.get("logoUrl"),
+                ))
+            if out:
+                return out
+        except Exception:
+            pass
+    return [BankInstitutionOut(id=i["id"], name=i["name"], provider=OPEN_FINANCE_PROVIDER) for i in OPEN_FINANCE_INSTITUTIONS]
+
+@api_router.get("/open-finance/connections", response_model=List[BankConnectionDetailsOut])
+async def list_open_finance_connections(current=Depends(get_current_user)):
+    conn_res = supabase.table("bank_connections").select("*").eq("user_id", current["id"]).order("created_at", desc=True).execute()
+    connections = conn_res.data or []
+    out: List[BankConnectionDetailsOut] = []
+    for conn in connections:
+        account_res = supabase.table("bank_accounts").select("*").eq("connection_id", conn["id"]).execute()
+        card_res = supabase.table("bank_cards").select("*").eq("connection_id", conn["id"]).execute()
+        out.append(BankConnectionDetailsOut(
+            connection=BankConnectionOut(
+                id=conn["id"],
+                user_id=conn["user_id"],
+                institution_id=conn["institution_id"],
+                institution_name=conn["institution_name"],
+                status=_normalize_of_status(conn.get("status")),
+                last_sync=conn.get("last_sync"),
+                created_at=conn["created_at"],
+            ),
+            accounts=[BankAccountOut(**a) for a in (account_res.data or [])],
+            cards=[BankCardOut(**c) for c in (card_res.data or [])],
+        ))
+    return out
+
+@api_router.post("/open-finance/connections/connect", response_model=BankConnectionDetailsOut)
+async def connect_open_finance_bank(payload: BankConnectRequest, current=Depends(get_current_user)):
+    institution_name = payload.institution_name
+    if not institution_name:
+        match = next((i for i in OPEN_FINANCE_INSTITUTIONS if i["id"] == payload.institution_id), None)
+        institution_name = match["name"] if match else payload.institution_id
+
+    now = _now_iso()
+    conn_id = str(uuid.uuid4())
+    provider_item_id = ""
+    if OPEN_FINANCE_PROVIDER == "pluggy":
+        if not (PLUGGY_CLIENT_ID and PLUGGY_CLIENT_SECRET):
+            raise HTTPException(status_code=503, detail="Pluggy não configurado no backend")
+        item_id = (payload.provider_item_id or "").strip()
+        if not item_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Conexão real exige provider_item_id do Pluggy (itemId)"
+            )
+        provider_item_id = _encrypt_secret(item_id)
+
+    row = {
+        "id": conn_id,
+        "user_id": current["id"],
+        "institution_id": payload.institution_id,
+        "institution_name": institution_name,
+        "status": "syncing",
+        "provider": OPEN_FINANCE_PROVIDER,
+        "provider_item_id": provider_item_id,
+        "last_sync": None,
+        "last_error": None,
+        "created_at": now,
+        "updated_at": now,
+    }
+    supabase.table("bank_connections").insert(row).execute()
+
+    _sync_open_finance_connection(row, current["id"])
+    listed = await list_open_finance_connections(current)
+    found = next((x for x in listed if x.connection.id == conn_id), None)
+    if not found:
+        raise HTTPException(status_code=500, detail="Conexão criada, mas não foi possível carregar dados")
+    return found
+
+@api_router.post("/open-finance/connections/{connection_id}/sync", response_model=BankConnectionDetailsOut)
+async def sync_open_finance_connection(connection_id: str, current=Depends(get_current_user)):
+    conn_res = supabase.table("bank_connections").select("*").eq("id", connection_id).eq("user_id", current["id"]).execute()
+    if not conn_res.data:
+        raise HTTPException(status_code=404, detail="Conexão bancária não encontrada")
+    conn = conn_res.data[0]
+    _sync_open_finance_connection(conn, current["id"])
+    listed = await list_open_finance_connections(current)
+    found = next((x for x in listed if x.connection.id == connection_id), None)
+    if not found:
+        raise HTTPException(status_code=500, detail="Falha ao carregar conexão sincronizada")
+    return found
+
+@api_router.post("/open-finance/sync-all")
+async def sync_all_open_finance(current=Depends(get_current_user)):
+    conn_res = supabase.table("bank_connections").select("*").eq("user_id", current["id"]).execute()
+    rows = conn_res.data or []
+    for conn in rows:
+        try:
+            _sync_open_finance_connection(conn, current["id"])
+        except Exception:
+            continue
+    return {"ok": True, "connections": len(rows)}
+
+@api_router.delete("/open-finance/connections/{connection_id}")
+async def disconnect_open_finance(connection_id: str, current=Depends(get_current_user)):
+    conn_res = supabase.table("bank_connections").select("id").eq("id", connection_id).eq("user_id", current["id"]).execute()
+    if not conn_res.data:
+        raise HTTPException(status_code=404, detail="Conexão bancária não encontrada")
+
+    account_res = supabase.table("bank_accounts").select("id").eq("connection_id", connection_id).execute()
+    account_ids = [a["id"] for a in (account_res.data or [])]
+    if account_ids:
+        links = supabase.table("bank_transaction_links").select("id,transaction_id").eq("user_id", current["id"]).in_("bank_account_id", account_ids).execute()
+        link_rows = links.data or []
+        tx_ids = [r["transaction_id"] for r in link_rows]
+        if tx_ids:
+            supabase.table("transactions").delete().eq("user_id", current["id"]).in_("id", tx_ids).execute()
+        supabase.table("bank_transaction_links").delete().eq("user_id", current["id"]).in_("bank_account_id", account_ids).execute()
+
+    supabase.table("bank_cards").delete().eq("connection_id", connection_id).execute()
+    supabase.table("bank_accounts").delete().eq("connection_id", connection_id).execute()
+    supabase.table("bank_connections").delete().eq("id", connection_id).eq("user_id", current["id"]).execute()
     return {"ok": True}
 
 # ---------- GOALS ----------

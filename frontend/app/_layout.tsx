@@ -20,6 +20,7 @@ function usePrefetch(isLoggedIn: boolean) {
     // Fire-and-forget — não bloqueia nada
     setTimeout(() => {
       Promise.all([
+        api.syncOpenFinanceAll?.().catch(() => {}),
         api.listTransactions().then(v => cacheSet('transactions_bundle', { txs: v, cats: [] })),
         api.listCategories().then(v => cacheSet('categories_data', v)),
         api.listGoals?.().then((v: any) => cacheSet('goals_data', v)).catch(() => {}),
