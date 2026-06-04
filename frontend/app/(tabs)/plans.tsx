@@ -58,7 +58,7 @@ const PLANS = [
     name: 'Premium',
     price: 'R$ 59,90',
     period: '/mês',
-    badge: '🏆 Mais Completo',
+    badge: null,
     desc: 'O máximo em controle e inteligência financeira.',
     color: '#F59E0B',
     gradient: ['#D97706', '#B45309'] as [string, string],
@@ -209,7 +209,7 @@ const makeStyles = (colors: any) => StyleSheet.create({
 
   card: { backgroundColor: colors.surface, borderRadius: 22, marginBottom: 16,
     borderWidth: 1, borderColor: colors.border, overflow: 'hidden' },
-  badge: { position: 'absolute', top: 12, right: 12, zIndex: 10,
+  badge: { position: 'absolute', top: 52, right: 12, zIndex: 10,
     paddingHorizontal: 10, paddingVertical: 4, borderRadius: 99 },
   badgeTxt: { color: '#fff', fontSize: 11, fontWeight: '800' },
 

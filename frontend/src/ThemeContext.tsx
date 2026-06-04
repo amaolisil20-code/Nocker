@@ -79,7 +79,7 @@ const translations = {
   pt: {
     // Tabs
     home: 'Início',
-    transactions: 'Movimentos',
+    transactions: 'Transações',
     nockerIA: 'Nocker IA',
     cards: 'Cartões',
     more: 'Mais',

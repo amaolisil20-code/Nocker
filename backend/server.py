@@ -4,6 +4,8 @@ from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 import os
 import logging
+import json
+import ast
 import bcrypt
 import jwt
 from pathlib import Path
@@ -315,9 +317,94 @@ def user_to_out(user: dict) -> UserOut:
         username=user.get('username'),
         phone=user.get('phone'),
         birth_date=user.get('birth_date'),
-        avatar_url=user.get('avatar_url'),
+        avatar_url=_resolve_avatar_url(user.get('avatar_url')),
         created_at=user['created_at'],
     )
+
+def _extract_storage_public_url(value: object) -> Optional[str]:
+    if isinstance(value, dict):
+        data = value.get("data") if isinstance(value.get("data"), dict) else {}
+        url = (
+            value.get("publicUrl")
+            or value.get("publicURL")
+            or value.get("signedUrl")
+            or value.get("signedURL")
+            or data.get("publicUrl")
+            or data.get("publicURL")
+            or data.get("signedUrl")
+            or data.get("signedURL")
+        )
+        return url if isinstance(url, str) else None
+    return value if isinstance(value, str) else None
+
+def _extract_avatar_path(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    if value.startswith("data:"):
+        return None
+    if value.startswith("http"):
+        markers = [
+            "/storage/v1/object/public/avatars/",
+            "/storage/v1/object/sign/avatars/",
+            "/object/public/avatars/",
+            "/object/sign/avatars/",
+        ]
+        for marker in markers:
+            if marker in value:
+                return value.split(marker, 1)[1].split("?", 1)[0]
+        return None
+    return value
+
+def _resolve_avatar_url(raw_value: Optional[object]) -> Optional[str]:
+    if raw_value is None:
+        return None
+
+    value: object = raw_value
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        if stripped.startswith("{") and stripped.endswith("}"):
+            try:
+                value = json.loads(stripped)
+            except Exception:
+                try:
+                    value = ast.literal_eval(stripped)
+                except Exception:
+                    value = stripped
+        else:
+            value = stripped
+
+    direct_url = _extract_storage_public_url(value)
+    if isinstance(direct_url, str) and direct_url.startswith("http"):
+        return direct_url
+    if isinstance(direct_url, str) and direct_url.startswith("data:"):
+        return direct_url
+
+    path = _extract_avatar_path(direct_url if isinstance(direct_url, str) else None)
+    if not path:
+        return direct_url if isinstance(direct_url, str) else None
+
+    try:
+        signed_result = supabase.storage.from_("avatars").create_signed_url(path, 60 * 60 * 24 * 30)
+        signed = _extract_storage_public_url(signed_result)
+        if isinstance(signed, str):
+            if signed.startswith("http"):
+                return signed
+            if signed.startswith("/") and SUPABASE_URL:
+                return f"{SUPABASE_URL.rstrip('/')}{signed}"
+    except Exception:
+        pass
+
+    try:
+        public_result = supabase.storage.from_("avatars").get_public_url(path)
+        public_url = _extract_storage_public_url(public_result)
+        if isinstance(public_url, str) and public_url.startswith("http"):
+            return public_url
+    except Exception:
+        pass
+
+    return direct_url if isinstance(direct_url, str) else None
 
 def _extract_avatar_path_from_url(value: Optional[str]) -> Optional[str]:
     if not value:
@@ -516,7 +603,7 @@ async def upload_avatar(file: UploadFile = File(...), current=Depends(get_curren
             content,
             file_options={"content-type": content_type, "upsert": "true"},
         )
-        avatar_url = supabase.storage.from_("avatars").get_public_url(path)
+        avatar_url = path
     except Exception as storage_err:
         logging.warning("Avatar storage upload failed, saving inline: %s", storage_err)
         import base64
