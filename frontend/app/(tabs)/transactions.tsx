@@ -8,6 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { api } from '../../src/api';
+import { staleWhileRevalidate, cacheSet } from '../../src/cache';
 import { useTheme } from '../../src/ThemeContext';
 
 export default function Transactions() {
@@ -47,12 +48,19 @@ export default function Transactions() {
       const [txs, cats] = await Promise.all([api.listTransactions(), api.listCategories()]);
       setItems(txs);
       setCategories(cats);
+      cacheSet('transactions_bundle', { txs, cats });
     } catch { /* ignore */ }
   };
 
   const availableCategories = categories.filter(c => c.type === type).map(c => c.name);
 
-  useFocusEffect(useCallback(() => { load(); }, []));
+  useFocusEffect(useCallback(() => {
+    staleWhileRevalidate(
+      'transactions_bundle',
+      () => Promise.all([api.listTransactions(), api.listCategories()]).then(([txs, cats]) => ({ txs, cats })),
+      ({ txs, cats }) => { setItems(txs); setCategories(cats); },
+    ).catch(() => {});
+  }, []));
 
   useEffect(() => {
     if (params.open === 'income' || params.open === 'expense') {
@@ -116,14 +124,15 @@ export default function Transactions() {
     try {
       const iso = date.toISOString().split('T')[0];
       if (editingId) {
-        await api.updateTransaction(editingId, {
+        const updated = await api.updateTransaction(editingId, {
           type, amount: v, category, description: description.trim(), date: iso,
         });
+        setItems(prev => prev.map(i => i.id === editingId ? updated : i));
       } else {
-        await api.createTransaction({ type, amount: v, category, description: description.trim(), date: iso });
+        const created = await api.createTransaction({ type, amount: v, category, description: description.trim(), date: iso });
+        setItems(prev => [created, ...prev]);
       }
       setModal(false);
-      await load();
     } catch (e: any) { Alert.alert('Erro', e.message); } finally { setSaving(false); }
   };
 
@@ -133,7 +142,7 @@ export default function Transactions() {
       { text: t.cancel },
       {
         text: t.delete, style: 'destructive',
-        onPress: async () => { await api.deleteTransaction(id); await load(); },
+        onPress: async () => { await api.deleteTransaction(id); setItems(prev => prev.filter(i => i.id !== id)); },
       },
     ]);
   };

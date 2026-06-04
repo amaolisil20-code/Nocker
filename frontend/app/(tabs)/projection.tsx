@@ -7,6 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api } from '../../src/api';
+import { staleWhileRevalidate } from '../../src/cache';
 import { fmtBRL } from '../../src/theme';
 import { useTheme } from '../../src/ThemeContext';
 import { SubHeader } from '../../src/components/SubHeader';
@@ -24,15 +25,20 @@ export default function Projection() {
   const { colors } = useTheme();
   const s = makeStyles(colors);
   const [data, setData] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [range, setRange] = useState(6);
 
   const load = async (months: number) => {
-    setLoading(true);
-    try { setData(await api.projection(months)); } catch { /* ignore */ } finally { setLoading(false); }
+    try { setData(await api.projection(months)); } catch { }
   };
 
-  useFocusEffect(useCallback(() => { load(range); }, [range]));
+  useFocusEffect(useCallback(() => {
+    staleWhileRevalidate(
+      `projection_${range}`,
+      () => api.projection(range),
+      (d) => { setData(d); setLoading(false); },
+    ).catch(() => setLoading(false));
+  }, [range]));
 
   const positive = (data?.monthly_net || 0) >= 0;
   const projValues = (data?.projection || []).map((p: any) => p.projected_balance);

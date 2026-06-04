@@ -2,19 +2,33 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const BASE = process.env.EXPO_PUBLIC_BACKEND_URL;
 
-// Acorda o servidor Railway logo ao importar a API (evita cold start)
-// Fire-and-forget — não bloqueia nada
-fetch(`${BASE}/health`, { method: 'GET' }).catch(() => {});
+// Cache do token em memória — evita AsyncStorage a cada request
+let _tokenCache: string | null | undefined = undefined;
 
-async function authHeader() {
-  const token = await AsyncStorage.getItem('nocker_token');
-  return token ? { Authorization: `Bearer ${token}` } : {};
+export async function getToken(): Promise<string | null> {
+  if (_tokenCache !== undefined) return _tokenCache;
+  _tokenCache = await AsyncStorage.getItem('nocker_token');
+  return _tokenCache;
 }
 
+export async function setToken(token: string) {
+  _tokenCache = token;
+  await AsyncStorage.setItem('nocker_token', token);
+}
+
+export async function clearToken() {
+  _tokenCache = null;
+  await AsyncStorage.removeItem('nocker_token');
+}
+
+// Acorda o servidor Railway logo ao importar a API (evita cold start)
+fetch(`${BASE}/health`, { method: 'GET' }).catch(() => {});
+
 async function request(path: string, opts: RequestInit = {}) {
+  const token = await getToken();
   const headers: any = {
     'Content-Type': 'application/json',
-    ...(await authHeader()),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...(opts.headers || {}),
   };
   const controller = new AbortController();
@@ -211,13 +225,3 @@ export const api = {
   upsertSpendingAlert: (data: { type: string; threshold_pct: number; active: boolean }) =>
     request('/spending-alerts', { method: 'PUT', body: JSON.stringify(data) }),
 };
-
-export async function setToken(token: string) {
-  await AsyncStorage.setItem('nocker_token', token);
-}
-export async function clearToken() {
-  await AsyncStorage.removeItem('nocker_token');
-}
-export async function getToken() {
-  return AsyncStorage.getItem('nocker_token');
-}

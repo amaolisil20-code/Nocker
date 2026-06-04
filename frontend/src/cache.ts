@@ -5,7 +5,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const PREFIX = 'nocker_cache_';
-const TTL_MS = 5 * 60 * 1000; // 5 minutos — depois disso força refresh
+const TTL_MS = 2 * 60 * 1000; // 2 minutos
 
 type CacheEntry<T> = { data: T; ts: number };
 

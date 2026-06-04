@@ -7,6 +7,30 @@ import { ThemeProvider, useTheme } from '../src/ThemeContext';
 import { useAppLock } from '../src/useAppLock';
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useEffect, useRef } from 'react';
+import { api } from '../src/api';
+import { cacheSet } from '../src/cache';
+
+// Pré-carrega todas as telas em background logo após o login
+function usePrefetch(isLoggedIn: boolean) {
+  const done = useRef(false);
+  useEffect(() => {
+    if (!isLoggedIn || done.current) return;
+    done.current = true;
+    // Fire-and-forget — não bloqueia nada
+    setTimeout(() => {
+      Promise.all([
+        api.listTransactions().then(v => cacheSet('transactions_bundle', { txs: v, cats: [] })),
+        api.listCategories().then(v => cacheSet('categories_data', v)),
+        api.listGoals?.().then((v: any) => cacheSet('goals_data', v)).catch(() => {}),
+        api.listCards?.().then((v: any) => cacheSet('cards_data', v)).catch(() => {}),
+        api.listSubscriptions?.().then((v: any) => cacheSet('subscriptions_data', v)).catch(() => {}),
+        api.listFixedExpenses?.().then((v: any) => cacheSet('fixed_expenses_data', v)).catch(() => {}),
+        api.listInstallments?.().then((v: any) => cacheSet('installments_data', v)).catch(() => {}),
+      ]).catch(() => {});
+    }, 1500); // Aguarda 1.5s após login para não competir com o dashboard
+  }, [isLoggedIn]);
+}
 
 function LockScreen({ onTryAgain }: { onTryAgain: () => void }) {
   const { colors } = useTheme();
@@ -28,6 +52,7 @@ function AppContent() {
   const { themeMode, colors } = useTheme();
   const { user, loading } = useAuth();
   const { locked, authenticate } = useAppLock(!!user);
+  usePrefetch(!!user);
 
   if (loading) {
     return (

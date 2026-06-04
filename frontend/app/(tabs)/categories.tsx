@@ -7,6 +7,7 @@ import { useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api } from '../../src/api';
+import { staleWhileRevalidate } from '../../src/cache';
 import { useTheme } from '../../src/ThemeContext';
 import { SubHeader } from '../../src/components/SubHeader';
 
@@ -25,23 +26,28 @@ export default function Categories() {
   const [icon, setIcon] = useState(ICONS[0]);
   const [saving, setSaving] = useState(false);
 
-  const load = async () => { try { setItems(await api.listCategories()); } catch { /* ignore */ } };
-  useFocusEffect(useCallback(() => { load(); }, []));
+  const load = async () => { try { setItems(await api.listCategories()); } catch { } };
+  useFocusEffect(useCallback(() => {
+    staleWhileRevalidate('categories_data', () => api.listCategories(), (cats) => setItems(cats)).catch(() => {});
+  }, []));
 
   const save = async () => {
     if (!name.trim()) return Alert.alert('Atenção', 'Informe o nome');
     setSaving(true);
     try {
-      await api.createCategory({ name: name.trim(), type, color, icon });
+      const created = await api.createCategory({ name: name.trim(), type, color, icon });
+      setItems(prev => [...prev, created]);
       setModal(false); setName('');
-      await load();
     } catch (e: any) { Alert.alert('Erro', e.message); } finally { setSaving(false); }
   };
 
   const remove = (id: string) =>
     Alert.alert('Excluir', 'Excluir categoria?', [
       { text: 'Cancelar' },
-      { text: 'Excluir', style: 'destructive', onPress: async () => { await api.deleteCategory(id); await load(); } },
+      { text: 'Excluir', style: 'destructive', onPress: async () => {
+        await api.deleteCategory(id);
+        setItems(prev => prev.filter(i => i.id !== id));
+      }},
     ]);
 
   const expense = items.filter(i => i.type === 'expense');
