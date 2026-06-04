@@ -14,7 +14,10 @@ from typing import List, Optional, Literal
 import uuid
 from datetime import datetime, timezone, timedelta
 
-import anthropic
+try:
+    import anthropic
+except Exception:
+    anthropic = None
 from supabase import create_client, Client
 
 ROOT_DIR = Path(__file__).parent
@@ -1278,6 +1281,8 @@ async def chat(payload: ChatRequest, current=Depends(get_current_user)):
     history = history_response.data if history_response.data else []
 
     try:
+        if anthropic is None:
+            raise HTTPException(status_code=503, detail="IA temporariamente indisponível neste ambiente")
         client = anthropic.Anthropic(api_key=EMERGENT_LLM_KEY)
 
         messages = []
