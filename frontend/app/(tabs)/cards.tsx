@@ -4,6 +4,7 @@ import {
   KeyboardAvoidingView, Platform, Alert, Dimensions,
 } from 'react-native';
 import { useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { Redirect, useRouter } from 'expo-router';
 import { useCachedLoad } from '../../src/useCachedLoad';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -11,13 +12,17 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api } from '../../src/api';
 import { staleWhileRevalidate } from '../../src/cache';
 import { useTheme } from '../../src/ThemeContext';
+import { useAuth } from '../../src/AuthContext';
+import { PluggyConnectFlow } from '../../src/components/PluggyConnectFlow';
 
 const COLORS = ['#16A34A', '#3B82F6', '#8B5CF6', '#F59E0B', '#EC4899', '#06B6D4'];
 const BRANDS = ['Visa', 'Mastercard', 'Elo', 'Amex'];
 
 export default function Cards() {
+  const router = useRouter();
   const insets = useSafeAreaInsets();
   const { colors, t, themeMode } = useTheme();
+  const { user, loading: authLoading } = useAuth();
   const s = makeStyles(colors);
   const params = useLocalSearchParams<{ open?: string }>();
   const [items, setItems] = useState<any[]>([]);
@@ -37,11 +42,16 @@ export default function Cards() {
   const [openFinanceMode, setOpenFinanceMode] = useState<'real' | 'mock'>('mock');
   const [openFinanceProvider, setOpenFinanceProvider] = useState<string>('mock');
   const [openFinanceReason, setOpenFinanceReason] = useState<string | null>(null);
-  const [providerItemId, setProviderItemId] = useState('');
   const [loadingInstitutions, setLoadingInstitutions] = useState(false);
   const [loadingConnections, setLoadingConnections] = useState(false);
   const [connectingBankId, setConnectingBankId] = useState<string | null>(null);
   const [syncingConnectionId, setSyncingConnectionId] = useState<string | null>(null);
+  const [selectedInstitution, setSelectedInstitution] = useState<any | null>(null);
+  const [pluggyConnectVisible, setPluggyConnectVisible] = useState(false);
+
+  if (!authLoading && !user) {
+    return <Redirect href="/login" />;
+  }
 
   const fmtBRL = (v: number) =>
     new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
@@ -67,6 +77,11 @@ export default function Cards() {
   useEffect(() => { if (params.open) setModal(true); }, [params.open]);
 
   const openBankConnect = async () => {
+    if (!user) {
+      Alert.alert('Sessão expirada', 'Entre novamente para conectar um banco.');
+      router.replace('/login');
+      return;
+    }
     setBankModal(true);
     if (institutions.length > 0) return;
     setLoadingInstitutions(true);
@@ -80,20 +95,24 @@ export default function Cards() {
     }
   };
 
-  const connectInstitution = async (institution: any) => {
-    if (openFinanceMode === 'real' && openFinanceProvider === 'pluggy' && !providerItemId.trim()) {
-      return Alert.alert('Item ID obrigatório', 'Informe o itemId do Pluggy para conexão real.');
+  const connectInstitution = async (institution: any, providerItemId?: string) => {
+    if (!user) {
+      Alert.alert('Sessão expirada', 'Entre novamente para conectar um banco.');
+      router.replace('/login');
+      return;
+    }
+    if (openFinanceMode === 'real' && openFinanceProvider === 'pluggy' && !providerItemId?.trim()) {
+      return Alert.alert('Pluggy Connect', 'O itemId precisa vir do fluxo oficial do Pluggy Connect.');
     }
     setConnectingBankId(institution.id);
     try {
       await api.connectOpenFinanceBank(
         institution.id,
         institution.name,
-        openFinanceMode === 'real' && openFinanceProvider === 'pluggy' ? providerItemId.trim() : undefined
+        openFinanceMode === 'real' && openFinanceProvider === 'pluggy' ? providerItemId?.trim() : undefined
       );
       setBankModal(false);
       setBankSearch('');
-      setProviderItemId('');
       await load();
       Alert.alert('Conectado', `${institution.name} conectado com sucesso.`);
     } catch (e: any) {
@@ -101,6 +120,40 @@ export default function Cards() {
     } finally {
       setConnectingBankId(null);
     }
+  };
+
+  const beginInstitutionConnect = (institution: any) => {
+    if (openFinanceMode === 'real' && openFinanceProvider === 'pluggy') {
+      if (Platform.OS === 'web') {
+        Alert.alert('Pluggy Connect', 'Abra o app no Android ou iPhone para concluir a conexão real com o Pluggy.');
+        return;
+      }
+      setSelectedInstitution(institution);
+      setPluggyConnectVisible(true);
+      setBankModal(false);
+      return;
+    }
+
+    void connectInstitution(institution);
+  };
+
+  const handlePluggySuccess = async (itemId: string) => {
+    if (!selectedInstitution) {
+      setPluggyConnectVisible(false);
+      return;
+    }
+
+    setPluggyConnectVisible(false);
+    try {
+      await connectInstitution(selectedInstitution, itemId);
+    } finally {
+      setSelectedInstitution(null);
+    }
+  };
+
+  const handlePluggyClose = () => {
+    setPluggyConnectVisible(false);
+    setSelectedInstitution(null);
   };
 
   const syncConnection = async (connectionId: string) => {
@@ -292,22 +345,6 @@ export default function Cards() {
               style={s.input}
             />
 
-            {openFinanceMode === 'real' && openFinanceProvider === 'pluggy' && (
-              <>
-                <Text style={s.label}>Item ID Pluggy (real)</Text>
-                <TextInput
-                  placeholder="Ex: 5f2c3..."
-                  placeholderTextColor={colors.textTertiary}
-                  value={providerItemId}
-                  onChangeText={setProviderItemId}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  style={s.input}
-                />
-                <Text style={s.connMetaSmall}>Use o itemId gerado no fluxo Connect do Pluggy.</Text>
-              </>
-            )}
-
             {loadingInstitutions ? (
               <Text style={s.connEmpty}>Carregando instituições...</Text>
             ) : filteredInstitutions.length === 0 ? (
@@ -317,7 +354,7 @@ export default function Cards() {
                 <TouchableOpacity
                   key={inst.id}
                   style={s.bankItem}
-                  onPress={() => connectInstitution(inst)}
+                  onPress={() => beginInstitutionConnect(inst)}
                   disabled={connectingBankId === inst.id}
                 >
                   <Text style={s.bankName}>{inst.name}</Text>
@@ -328,6 +365,15 @@ export default function Cards() {
           </ScrollView>
         </KeyboardAvoidingView>
       </Modal>
+
+      <PluggyConnectFlow
+        visible={pluggyConnectVisible}
+        userId={user?.id || ''}
+        institutionName={selectedInstitution?.name}
+        onSuccess={handlePluggySuccess}
+        onClose={handlePluggyClose}
+        onError={(message) => Alert.alert('Pluggy Connect', message)}
+      />
 
       <Modal visible={modal} transparent animationType="slide" onRequestClose={() => setModal(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.modalRoot}>

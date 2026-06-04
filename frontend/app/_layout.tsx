@@ -5,11 +5,13 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { AuthProvider, useAuth } from '../src/AuthContext';
 import { ThemeProvider, useTheme } from '../src/ThemeContext';
 import { useAppLock } from '../src/useAppLock';
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useRef } from 'react';
 import { api } from '../src/api';
 import { cacheSet } from '../src/cache';
+import { useNotificationListener } from '../src/useNotificationListener';
+import { checkNotificationPermission, requestNotificationPermission } from '../src/useNotificationListener';
 
 // Pré-carrega todas as telas em background logo após o login
 function usePrefetch(isLoggedIn: boolean) {
@@ -54,6 +56,27 @@ function AppContent() {
   const { user, loading } = useAuth();
   const { locked, authenticate } = useAppLock(!!user);
   usePrefetch(!!user);
+
+  // Listener de notificações bancárias
+  useNotificationListener();
+
+  useEffect(() => {
+    if (!user) return;
+    checkNotificationPermission().then(has => {
+      if (!has) {
+        setTimeout(() => {
+          Alert.alert(
+            '🔔 Ativar detecção automática',
+            'Permita que o Nocker leia notificações para registrar PIX e pagamentos automaticamente.',
+            [
+              { text: 'Agora não', style: 'cancel' },
+              { text: 'Ativar', onPress: requestNotificationPermission },
+            ]
+          );
+        }, 3000);
+      }
+    });
+  }, [user]);
 
   if (loading) {
     return (

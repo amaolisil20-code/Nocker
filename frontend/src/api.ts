@@ -226,6 +226,12 @@ export const api = {
       };
     }
   },
+  createOpenFinanceConnectToken: async (clientUserId: string) => {
+    return request('/open-finance/connect-token', {
+      method: 'POST',
+      body: JSON.stringify({ client_user_id: clientUserId }),
+    });
+  },
   getOpenFinanceRuntimeMode: () => _ofRuntimeMode,
   listOpenFinanceInstitutions: async () => {
     try {

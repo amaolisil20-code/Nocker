@@ -272,6 +272,10 @@ class BankConnectRequest(BaseModel):
     institution_name: Optional[str] = None
     provider_item_id: Optional[str] = None
 
+
+class ConnectTokenRequest(BaseModel):
+    client_user_id: Optional[str] = None
+
 class BankConnectionOut(BaseModel):
     id: str
     user_id: str
@@ -664,6 +668,15 @@ def _pluggy_request(method: str, path: str, payload: Optional[dict] = None) -> d
     if res.status_code >= 300:
         raise HTTPException(status_code=502, detail=f"Erro no provedor Open Finance: {res.text[:180]}")
     return res.json() if res.text else {}
+
+
+def _create_pluggy_connect_token(client_user_id: str) -> dict:
+    payload = {
+        "options": {
+            "clientUserId": client_user_id,
+        }
+    }
+    return _pluggy_request("POST", "/connect_token", payload)
 
 def _upsert_bank_account(connection_id: str, account: dict) -> None:
     account_id = account["id"]
@@ -1131,6 +1144,20 @@ async def delete_card(card_id: str, current=Depends(get_current_user)):
 @api_router.get("/open-finance/status", response_model=OpenFinanceStatusOut)
 async def open_finance_status(current=Depends(get_current_user)):
     return _open_finance_status_payload()
+
+
+@api_router.post("/open-finance/connect-token")
+async def create_open_finance_connect_token(payload: ConnectTokenRequest, current=Depends(get_current_user)):
+    if OPEN_FINANCE_PROVIDER != "pluggy":
+        raise HTTPException(status_code=400, detail="Connect Token só está disponível para Pluggy")
+    if not (PLUGGY_CLIENT_ID and PLUGGY_CLIENT_SECRET):
+        raise HTTPException(status_code=503, detail="Pluggy não configurado no backend")
+
+    client_user_id = (payload.client_user_id or current["id"]).strip()
+    if not client_user_id:
+        raise HTTPException(status_code=400, detail="client_user_id inválido")
+
+    return _create_pluggy_connect_token(client_user_id)
 
 @api_router.get("/open-finance/institutions", response_model=List[BankInstitutionOut])
 async def list_open_finance_institutions(current=Depends(get_current_user)):

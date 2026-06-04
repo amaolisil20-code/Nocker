@@ -36,24 +36,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const t = await getToken();
         if (!t) { setLoading(false); return; }
 
+        // Libera a interface imediatamente; qualquer validação acontece em background.
+        setLoading(false);
+
         // 1. Carrega usuário do cache imediatamente — sem esperar a rede
         const cached = await cacheGet<User>('user_me');
         if (cached) {
           setUser(cached.data);
-          setLoading(false); // libera a tela imediatamente
         }
 
-        // 2. Valida token com o servidor em background
-        try {
-          const u = await api.me();
-          setUser(u);
-          await cacheSet('user_me', u);
-        } catch {
-          // Token inválido — limpa tudo
-          await clearToken();
-          await cacheSet('user_me', null as any);
-          setUser(null);
-        }
+        // 2. Valida o token em background sem bloquear a UI
+
+        void (async () => {
+          try {
+            const u = await api.me();
+            setUser(u);
+            await cacheSet('user_me', u);
+          } catch {
+            // Token inválido — limpa tudo sem travar a UI
+            await clearToken();
+            await cacheSet('user_me', null as any);
+            setUser(null);
+          }
+        })();
       } finally {
         setLoading(false);
       }
