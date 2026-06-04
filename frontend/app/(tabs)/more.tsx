@@ -21,6 +21,7 @@ export default function More() {
     { key: 'subscriptions', label: 'Assinaturas', icon: 'repeat', color: '#8B5CF6', route: '/(tabs)/subscriptions', desc: 'Serviços recorrentes' },
     { key: 'projection', label: 'Projeção', icon: 'analytics', color: '#06B6D4', route: '/(tabs)/projection', desc: 'Previsão financeira' },
     { key: 'categories', label: 'Categorias', icon: 'pricetags', color: '#EC4899', route: '/(tabs)/categories', desc: 'Organize seus gastos' },
+    { key: 'plans', label: 'Planos', icon: 'star', color: '#F59E0B', route: '/(tabs)/plans', desc: 'Gratuito, Pro e Premium' },
     { key: 'settings', label: t.settings, icon: 'settings', color: '#16A34A', route: '/(tabs)/settings', desc: 'Perfil e preferências' },
   ];
 

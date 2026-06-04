@@ -83,6 +83,7 @@ export default function TabsLayout() {
       <Tabs.Screen name="subscriptions" options={{ href: null }} />
       <Tabs.Screen name="projection" options={{ href: null }} />
       <Tabs.Screen name="categories" options={{ href: null }} />
+      <Tabs.Screen name="plans" options={{ href: null }} />
     </Tabs>
   );
 }
