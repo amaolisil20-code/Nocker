@@ -24,3 +24,6 @@ jq>=1.6.0
 typer>=0.9.0
 supabase>=2.4.0
 anthropic>=0.25.0
+Pillow>=10.0.0
+pytesseract>=0.3.10
+psycopg2-binary>=2.9.9

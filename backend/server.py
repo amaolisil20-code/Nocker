@@ -3,6 +3,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 import os
+import asyncio
 import logging
 import json
 import ast
@@ -15,6 +16,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field, EmailStr
 from typing import List, Optional, Literal
 import uuid
+import time
 from datetime import datetime, timezone, timedelta
 
 try:
@@ -22,6 +24,8 @@ try:
 except Exception:
     anthropic = None
 from supabase import create_client, Client
+from ocr_parser import parse_ocr_text as _parse_ocr_text
+from ocr_vision import extract_from_image as _extract_from_image
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -99,6 +103,39 @@ class TransactionCreate(BaseModel):
     description: str
     date: Optional[datetime] = None
     card_id: Optional[str] = None
+
+class NotificationTransactionIn(BaseModel):
+    amount: float
+    type: Literal['income', 'expense']
+    description: str
+    bank: Optional[str] = None
+    raw: Optional[str] = None
+
+class DocumentOcrParseIn(BaseModel):
+    ocr_text: str
+
+class DocumentOcrBase64In(BaseModel):
+    image_base64: str
+    content_type: Optional[str] = "image/jpeg"
+
+class DocumentScanConfirmIn(BaseModel):
+    establishment: str
+    amount: float
+    category: str
+    transaction_date: Optional[datetime] = None
+    ocr_text: Optional[str] = None
+    type: Literal['income', 'expense'] = 'expense'
+
+class ScannedDocumentOut(BaseModel):
+    id: str
+    user_id: str
+    establishment: str
+    amount: float
+    category: str
+    transaction_date: datetime
+    ocr_text: Optional[str] = None
+    transaction_id: Optional[str] = None
+    created_at: datetime
 
 class TransactionOut(BaseModel):
     id: str
@@ -283,6 +320,7 @@ class BankConnectionOut(BaseModel):
     institution_name: str
     status: BankConnectionStatus
     last_sync: Optional[datetime] = None
+    last_error: Optional[str] = None
     created_at: datetime
 
 class BankAccountOut(BaseModel):
@@ -621,8 +659,15 @@ def _decrypt_secret(value: Optional[str]) -> Optional[str]:
     except Exception:
         return value
 
-def _classify_category(description: str, amount: float) -> str:
+def _classify_category(description: str, amount: float, tx_type: Optional[str] = None) -> str:
+    import re
     d = (description or "").lower()
+    if "pix" in d:
+        if tx_type == "income" or re.search(r"receb|credit|entrada", d):
+            if re.search(r"salario|salário|folha", d):
+                return "Salário"
+            return "Receitas"
+        return "Transferências"
     rules = [
         ("mercado|ifood|restaurante|padaria|açougue|supermercado", "Alimentação"),
         ("uber|99|combust|posto|estacionamento|metro|onibus", "Transporte"),
@@ -631,27 +676,100 @@ def _classify_category(description: str, amount: float) -> str:
         ("netflix|spotify|prime|disney|assinatura", "Assinaturas"),
         ("cinema|bar|lazer|show|stream", "Lazer"),
         ("salario|folha|pagamento empresa", "Salário"),
-        ("ted|doc|pix|transfer", "Transferências"),
+        ("ted|doc|transfer", "Transferências"),
         ("curso|faculdade|escola|educ", "Educação"),
         ("invest|corretora|tesouro|cdb|fii", "Investimentos"),
     ]
     for pattern, category in rules:
-        import re
         if re.search(pattern, d):
             return category
+    if tx_type == "income":
+        return "Receitas"
     return "Compras" if amount < 0 else "Receitas"
 
 def _tx_type_from_amount(amount: float) -> str:
     return "income" if amount >= 0 else "expense"
 
+def _pluggy_tx_type(tx: dict) -> str:
+    raw = (tx.get("type") or "").upper()
+    if raw == "CREDIT":
+        return "income"
+    if raw == "DEBIT":
+        return "expense"
+    amount = _safe_float(tx.get("amountInAccountCurrency") or tx.get("amount"))
+    if amount < 0:
+        return "expense"
+    desc = (tx.get("description") or "").lower()
+    if any(k in desc for k in ("recebido", "recebeu", "crédito", "credito", "entrada")):
+        return "income"
+    if any(k in desc for k in ("enviado", "enviou", "débito", "debito", "pagamento", "pago")):
+        return "expense"
+    return "income" if amount > 0 else "expense"
+
+def _pluggy_tx_amount(tx: dict) -> float:
+    return abs(_safe_float(tx.get("amountInAccountCurrency") or tx.get("amount")))
+
+def _pluggy_fetch_transactions_for_account(pluggy_account_id: str) -> List[dict]:
+    rows: List[dict] = []
+    page = 1
+    while page <= 20:
+        payload = _pluggy_request(
+            "GET",
+            f"/transactions?accountId={pluggy_account_id}&pageSize=500&page={page}",
+        )
+        batch = payload.get("results") or payload.get("data") or []
+        rows.extend(batch)
+        total_pages = int(payload.get("totalPages") or 1)
+        if page >= total_pages or not batch:
+            break
+        page += 1
+    return rows
+
+def _normalize_pluggy_account(account: dict) -> dict:
+    acc_type = (account.get("type") or "BANK").upper()
+    subtype = (account.get("subtype") or "").upper()
+    is_credit = acc_type == "CREDIT" or "CREDIT" in subtype
+    return {
+        "pluggy_id": str(account.get("id") or ""),
+        "id": f"{'card' if is_credit else 'acc'}-{account.get('id')}",
+        "account_name": account.get("name") or ("Cartão" if is_credit else "Conta"),
+        "account_type": "credit" if is_credit else (account.get("subtype") or "checking").lower(),
+        "balance": _safe_float(account.get("balance")),
+        "currency": account.get("currencyCode") or "BRL",
+        "is_credit": is_credit,
+        "credit_data": account.get("creditData") or {},
+    }
+
+def _normalize_pluggy_transaction(tx: dict, bank_account_id: str) -> dict:
+    tx_type = _pluggy_tx_type(tx)
+    abs_amount = _pluggy_tx_amount(tx)
+    signed = abs_amount if tx_type == "income" else -abs_amount
+    description = tx.get("description") or "Transação bancária"
+    return {
+        "id": f"plg-{tx.get('id')}",
+        "description": description,
+        "amount": signed,
+        "tx_type": tx_type,
+        "transaction_date": tx.get("date") or _now_iso(),
+        "category": _classify_category(description, signed, tx_type),
+        "bank_account_id": bank_account_id,
+    }
+
+_pluggy_api_key_cache: dict = {"token": None, "expires_at": 0.0}
+
 def _pluggy_headers() -> dict:
     if not PLUGGY_CLIENT_ID or not PLUGGY_CLIENT_SECRET:
         raise HTTPException(status_code=503, detail="Pluggy não configurado")
 
+    now_ts = datetime.now(timezone.utc).timestamp()
+    cached = _pluggy_api_key_cache.get("token")
+    if cached and now_ts < float(_pluggy_api_key_cache.get("expires_at") or 0):
+        return {"X-API-KEY": cached, "Content-Type": "application/json"}
+
     auth = requests.post(
         f"{PLUGGY_BASE_URL.rstrip('/')}/auth",
         json={"clientId": PLUGGY_CLIENT_ID, "clientSecret": PLUGGY_CLIENT_SECRET},
-        timeout=20,
+        timeout=45,
     )
     if auth.status_code >= 300:
         raise HTTPException(status_code=502, detail="Falha ao autenticar no provedor Open Finance")
@@ -659,12 +777,14 @@ def _pluggy_headers() -> dict:
     token = data.get("apiKey") or data.get("accessToken")
     if not token:
         raise HTTPException(status_code=502, detail="Token do provedor Open Finance inválido")
+    _pluggy_api_key_cache["token"] = token
+    _pluggy_api_key_cache["expires_at"] = now_ts + 7000
     return {"X-API-KEY": token, "Content-Type": "application/json"}
 
-def _pluggy_request(method: str, path: str, payload: Optional[dict] = None) -> dict:
+def _pluggy_request(method: str, path: str, payload: Optional[dict] = None, timeout: int = 45) -> dict:
     headers = _pluggy_headers()
     url = f"{PLUGGY_BASE_URL.rstrip('/')}{path}"
-    res = requests.request(method, url, headers=headers, json=payload, timeout=30)
+    res = requests.request(method, url, headers=headers, json=payload, timeout=timeout)
     if res.status_code >= 300:
         raise HTTPException(status_code=502, detail=f"Erro no provedor Open Finance: {res.text[:180]}")
     return res.json() if res.text else {}
@@ -677,6 +797,56 @@ def _create_pluggy_connect_token(client_user_id: str) -> dict:
         }
     }
     return _pluggy_request("POST", "/connect_token", payload)
+
+
+def _pluggy_get_item(item_id: str) -> dict:
+    return _pluggy_request("GET", f"/items/{item_id}")
+
+
+def _validate_pluggy_item_for_user(item_id: str, user_id: str) -> dict:
+    item = _pluggy_get_item(item_id)
+    client_user = str(item.get("clientUserId") or item.get("client_user_id") or "").strip()
+    if client_user and client_user != user_id:
+        raise HTTPException(status_code=403, detail="Esta conexão bancária não pertence à sua conta")
+    status = (item.get("status") or "").upper()
+    if status == "LOGIN_ERROR":
+        raise HTTPException(
+            status_code=400,
+            detail="Falha no login bancário. Tente conectar novamente.",
+        )
+    return item
+
+
+def _wait_pluggy_item_ready(item_id: str, max_attempts: int = 12, delay_sec: float = 2.5) -> dict:
+    last_item: dict = {}
+    for attempt in range(max_attempts):
+        item = _pluggy_get_item(item_id)
+        last_item = item
+        status = (item.get("status") or "").upper()
+        exec_status = (item.get("executionStatus") or "").upper()
+        if status in ("UPDATED", "OUTDATED"):
+            return item
+        if status == "LOGIN_ERROR":
+            raise HTTPException(
+                status_code=400,
+                detail="Não foi possível autenticar no banco. Verifique suas credenciais e tente novamente.",
+            )
+        if status == "UPDATING" or "IN_PROGRESS" in exec_status:
+            if attempt < max_attempts - 1:
+                time.sleep(delay_sec)
+                continue
+        if attempt < max_attempts - 1:
+            time.sleep(delay_sec)
+    return last_item
+
+
+def _find_connection_by_provider_item(user_id: str, provider_item_id: str) -> Optional[dict]:
+    conn_res = supabase.table("bank_connections").select("*").eq("user_id", user_id).execute()
+    for row in conn_res.data or []:
+        stored = _decrypt_secret(row.get("provider_item_id")) or ""
+        if stored == provider_item_id:
+            return row
+    return None
 
 def _upsert_bank_account(connection_id: str, account: dict) -> None:
     account_id = account["id"]
@@ -721,11 +891,12 @@ def _upsert_bank_card(connection_id: str, card: dict) -> None:
 def _upsert_transaction_from_bank(user_id: str, account_id: Optional[str], tx: dict) -> None:
     tx_id = tx["id"]
     amount = _safe_float(tx.get("amount"))
-    tx_type = _tx_type_from_amount(amount)
+    tx_type = tx.get("tx_type") or _tx_type_from_amount(amount)
     abs_amount = abs(amount)
     description = tx.get("description") or "Transação bancária"
     date_str = tx.get("transaction_date") or _now_iso()
-    category = tx.get("category") or _classify_category(description, amount)
+    category = tx.get("category") or _classify_category(description, amount, tx_type)
+    account_id = tx.get("bank_account_id") or account_id
 
     link = supabase.table("bank_transaction_links").select("id,transaction_id").eq("id", tx_id).execute()
     if link.data:
@@ -801,13 +972,15 @@ def _mock_transactions_for_connection(connection: dict, account_id: str) -> List
             "id": f"tx-{base}-001",
             "description": "PIX recebido Salário",
             "amount": 4200.00,
+            "tx_type": "income",
             "transaction_date": (now - timedelta(days=2)).isoformat(),
             "category": "Salário",
         },
         {
             "id": f"tx-{base}-002",
-            "description": "Supermercado",
+            "description": "PIX enviado Supermercado",
             "amount": -289.30,
+            "tx_type": "expense",
             "transaction_date": (now - timedelta(days=1)).isoformat(),
             "category": "Alimentação",
         },
@@ -815,6 +988,7 @@ def _mock_transactions_for_connection(connection: dict, account_id: str) -> List
             "id": f"tx-{base}-003",
             "description": "Uber",
             "amount": -42.55,
+            "tx_type": "expense",
             "transaction_date": now.isoformat(),
             "category": "Transporte",
         },
@@ -829,46 +1003,44 @@ def _sync_open_finance_connection(connection: dict, user_id: str) -> None:
             if not provider_item_id:
                 raise HTTPException(status_code=400, detail="Conexão sem item do provedor")
 
-            account_payload = _pluggy_request("GET", f"/accounts?itemId={provider_item_id}")
-            card_payload = _pluggy_request("GET", f"/accounts?itemId={provider_item_id}&type=CREDIT")
-            tx_payload = _pluggy_request("GET", f"/transactions?itemId={provider_item_id}&pageSize=300")
+            _validate_pluggy_item_for_user(provider_item_id, user_id)
+            _wait_pluggy_item_ready(provider_item_id)
 
+            account_payload = _pluggy_request("GET", f"/accounts?itemId={provider_item_id}")
             accounts_data = account_payload.get("results") or account_payload.get("data") or []
-            cards_data = card_payload.get("results") or card_payload.get("data") or []
-            tx_data = tx_payload.get("results") or tx_payload.get("data") or []
+            parsed_accounts = [_normalize_pluggy_account(a) for a in accounts_data if a.get("id")]
 
             normalized_accounts = [
                 {
-                    "id": f"acc-{a.get('id')}",
-                    "account_name": a.get("name") or "Conta",
-                    "account_type": (a.get("type") or "checking").lower(),
-                    "balance": _safe_float(a.get("balance")),
-                    "currency": a.get("currencyCode") or "BRL",
+                    "id": a["id"],
+                    "account_name": a["account_name"],
+                    "account_type": a["account_type"],
+                    "balance": a["balance"],
+                    "currency": a["currency"],
                 }
-                for a in accounts_data
+                for a in parsed_accounts
+                if not a["is_credit"]
             ]
             normalized_cards = [
                 {
-                    "id": f"card-{c.get('id')}",
-                    "card_name": c.get("name") or "Cartão",
-                    "card_brand": (c.get("subtype") or "visa").lower(),
-                    "limit_total": _safe_float(c.get("creditData", {}).get("limit")),
-                    "limit_available": _safe_float(c.get("creditData", {}).get("availableLimit")),
-                    "invoice_amount": _safe_float(c.get("creditData", {}).get("usedLimit")),
-                    "due_date": str(c.get("creditData", {}).get("closeDay") or ""),
+                    "id": a["id"],
+                    "card_name": a["account_name"],
+                    "card_brand": (a["credit_data"].get("brand") or "visa").lower(),
+                    "limit_total": _safe_float(a["credit_data"].get("limit")),
+                    "limit_available": _safe_float(a["credit_data"].get("availableLimit")),
+                    "invoice_amount": _safe_float(a["credit_data"].get("usedLimit")),
+                    "due_date": str(a["credit_data"].get("dueDay") or a["credit_data"].get("closeDay") or ""),
                 }
-                for c in cards_data
+                for a in parsed_accounts
+                if a["is_credit"]
             ]
-            normalized_txs = [
-                {
-                    "id": f"plg-{t.get('id')}",
-                    "description": t.get("description") or "Transação",
-                    "amount": _safe_float(t.get("amount")),
-                    "transaction_date": t.get("date") or now,
-                    "category": _classify_category(t.get("description") or "", _safe_float(t.get("amount"))),
-                }
-                for t in tx_data
-            ]
+            normalized_txs: List[dict] = []
+            for account in parsed_accounts:
+                pluggy_id = account.get("pluggy_id")
+                if not pluggy_id:
+                    continue
+                for raw_tx in _pluggy_fetch_transactions_for_account(pluggy_id):
+                    normalized_txs.append(_normalize_pluggy_transaction(raw_tx, account["id"]))
         else:
             normalized_accounts = _mock_accounts_for_connection(connection)
             normalized_cards = _mock_cards_for_connection(connection)
@@ -878,8 +1050,15 @@ def _sync_open_finance_connection(connection: dict, user_id: str) -> None:
             _upsert_bank_account(connection["id"], account)
         for card in normalized_cards:
             _upsert_bank_card(connection["id"], card)
+        default_account_id = normalized_accounts[0]["id"] if normalized_accounts else (
+            normalized_cards[0]["id"] if normalized_cards else None
+        )
         for tx in normalized_txs:
-            _upsert_transaction_from_bank(user_id, normalized_accounts[0]["id"] if normalized_accounts else None, tx)
+            _upsert_transaction_from_bank(
+                user_id,
+                tx.get("bank_account_id") or default_account_id,
+                tx,
+            )
 
         supabase.table("bank_connections").update({
             "status": "connected",
@@ -906,6 +1085,31 @@ def _sync_open_finance_connection(connection: dict, user_id: str) -> None:
 @api_router.get("/")
 async def health():
     return {"status": "ok"}
+
+
+@api_router.get("/ocr/status")
+async def ocr_status():
+    from ocr_vision import tesseract_available, _anthropic_client
+    return {
+        "tesseract": tesseract_available(),
+        "llm_text": _anthropic_client() is not None,
+    }
+
+
+@api_router.get("/open-finance/ready")
+async def open_finance_ready():
+    tables_ok = True
+    try:
+        supabase.table("bank_connections").select("id").limit(1).execute()
+    except Exception:
+        tables_ok = False
+    pluggy_ok = _open_finance_provider_ready()
+    return {
+        "ready": pluggy_ok and tables_ok and OPEN_FINANCE_PROVIDER == "pluggy",
+        "pluggy_configured": pluggy_ok,
+        "provider": OPEN_FINANCE_PROVIDER,
+        "tables_ok": tables_ok,
+    }
 
 # ---------- AUTH ----------
 @api_router.post("/auth/register", response_model=AuthResponse)
@@ -1059,6 +1263,15 @@ async def update_avatar(avatar_url: str, current=Depends(get_current_user)):
     return user_to_out(response.data[0])
 
 # ---------- TRANSACTIONS ----------
+def _notification_fingerprint(payload: NotificationTransactionIn) -> str:
+    today = datetime.now(timezone.utc).date().isoformat()
+    seed = f"{payload.bank or ''}|{payload.amount:.2f}|{payload.type}|{payload.description}|{today}"
+    return hashlib.sha256(seed.encode()).hexdigest()[:24]
+
+def _guess_category_from_text(text: str, tx_type: str) -> str:
+    signed = 1.0 if tx_type == "income" else -1.0
+    return _classify_category(text, signed, tx_type)
+
 @api_router.post("/transactions", response_model=TransactionOut)
 async def create_transaction(payload: TransactionCreate, current=Depends(get_current_user)):
     tx_id = str(uuid.uuid4())
@@ -1066,7 +1279,7 @@ async def create_transaction(payload: TransactionCreate, current=Depends(get_cur
         "id": tx_id,
         "user_id": current['id'],
         "type": payload.type,
-        "amount": float(payload.amount),
+        "amount": abs(float(payload.amount)),
         "category": payload.category,
         "description": payload.description,
         "date": (payload.date or datetime.now(timezone.utc)).isoformat(),
@@ -1074,6 +1287,45 @@ async def create_transaction(payload: TransactionCreate, current=Depends(get_cur
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     supabase.table('transactions').insert(doc).execute()
+    return TransactionOut(**doc)
+
+@api_router.post("/transactions/from-notification", response_model=TransactionOut)
+async def create_transaction_from_notification(payload: NotificationTransactionIn, current=Depends(get_current_user)):
+    link_id = f"notif-{_notification_fingerprint(payload)}"
+    existing = supabase.table("bank_transaction_links").select("transaction_id").eq("id", link_id).eq("user_id", current["id"]).execute()
+    if existing.data:
+        tx_res = supabase.table("transactions").select("*").eq("id", existing.data[0]["transaction_id"]).eq("user_id", current["id"]).execute()
+        if tx_res.data:
+            return TransactionOut(**tx_res.data[0])
+
+    text = f"{payload.description} {payload.raw or ''}".strip()
+    category = _guess_category_from_text(text, payload.type)
+    bank_label = payload.bank or "Banco"
+    description = payload.description.strip() or f"PIX {bank_label}"
+    tx_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc)
+    doc = {
+        "id": tx_id,
+        "user_id": current["id"],
+        "type": payload.type,
+        "amount": abs(float(payload.amount)),
+        "category": category,
+        "description": description,
+        "date": now.isoformat(),
+        "card_id": None,
+        "created_at": now.isoformat(),
+    }
+    supabase.table("transactions").insert(doc).execute()
+    try:
+        supabase.table("bank_transaction_links").insert({
+            "id": link_id,
+            "transaction_id": tx_id,
+            "user_id": current["id"],
+            "bank_account_id": None,
+            "created_at": now.isoformat(),
+        }).execute()
+    except Exception:
+        pass
     return TransactionOut(**doc)
 
 @api_router.get("/transactions", response_model=List[TransactionOut])
@@ -1124,13 +1376,32 @@ async def create_card(payload: CardCreate, current=Depends(get_current_user)):
 @api_router.get("/cards", response_model=List[CardOut])
 async def list_cards(current=Depends(get_current_user)):
     response = supabase.table('cards').select('*').eq('user_id', current['id']).order('created_at', desc=True).limit(100).execute()
-    items = response.data
-    
+    items = response.data or []
+
     # compute used from card transactions
     for it in items:
         tx_response = supabase.table('transactions').select('amount').eq('user_id', current['id']).eq('card_id', it['id']).eq('type', 'expense').execute()
         it['used'] = sum(float(tx['amount']) for tx in tx_response.data) if tx_response.data else 0.0
-    
+
+    conn_res = supabase.table("bank_connections").select("id").eq("user_id", current["id"]).execute()
+    conn_ids = [c["id"] for c in (conn_res.data or [])]
+    if conn_ids:
+        bank_cards_res = supabase.table("bank_cards").select("*").in_("connection_id", conn_ids).execute()
+        for bc in (bank_cards_res.data or []):
+            items.append({
+                "id": bc["id"],
+                "user_id": current["id"],
+                "name": bc.get("card_name") or "Cartão conectado",
+                "last_digits": "0000",
+                "brand": (bc.get("card_brand") or "visa").title(),
+                "card_limit": _safe_float(bc.get("limit_total")),
+                "closing_day": int(_safe_float(bc.get("due_date")) or 5),
+                "due_day": int(_safe_float(bc.get("due_date")) or 15),
+                "color": "#3B82F6",
+                "used": _safe_float(bc.get("invoice_amount")),
+                "created_at": bc.get("created_at") or _now_iso(),
+            })
+
     return [CardOut(**i) for i in items]
 
 @api_router.delete("/cards/{card_id}")
@@ -1153,11 +1424,16 @@ async def create_open_finance_connect_token(payload: ConnectTokenRequest, curren
     if not (PLUGGY_CLIENT_ID and PLUGGY_CLIENT_SECRET):
         raise HTTPException(status_code=503, detail="Pluggy não configurado no backend")
 
-    client_user_id = (payload.client_user_id or current["id"]).strip()
-    if not client_user_id:
-        raise HTTPException(status_code=400, detail="client_user_id inválido")
+    # Sempre amarra o token ao usuário autenticado (não confia no body do app)
+    client_user_id = current["id"].strip()
+    if payload.client_user_id and payload.client_user_id.strip() != client_user_id:
+        raise HTTPException(status_code=403, detail="client_user_id não corresponde ao usuário autenticado")
 
-    return _create_pluggy_connect_token(client_user_id)
+    raw = _create_pluggy_connect_token(client_user_id)
+    access_token = raw.get("accessToken") or raw.get("access_token") or raw.get("token")
+    if not access_token:
+        raise HTTPException(status_code=502, detail="Pluggy não retornou o token de conexão")
+    return {"accessToken": access_token}
 
 @api_router.get("/open-finance/institutions", response_model=List[BankInstitutionOut])
 async def list_open_finance_institutions(current=Depends(get_current_user)):
@@ -1195,6 +1471,7 @@ async def list_open_finance_connections(current=Depends(get_current_user)):
                 institution_name=conn["institution_name"],
                 status=_normalize_of_status(conn.get("status")),
                 last_sync=conn.get("last_sync"),
+                last_error=conn.get("last_error"),
                 created_at=conn["created_at"],
             ),
             accounts=[BankAccountOut(**a) for a in (account_res.data or [])],
@@ -1210,39 +1487,63 @@ async def connect_open_finance_bank(payload: BankConnectRequest, current=Depends
         institution_name = match["name"] if match else payload.institution_id
 
     now = _now_iso()
-    conn_id = str(uuid.uuid4())
-    provider_item_id = ""
+    provider_item_id_enc = ""
+    plain_item_id = ""
     if OPEN_FINANCE_PROVIDER == "pluggy":
         if not (PLUGGY_CLIENT_ID and PLUGGY_CLIENT_SECRET):
             raise HTTPException(status_code=503, detail="Pluggy não configurado no backend")
-        item_id = (payload.provider_item_id or "").strip()
-        if not item_id:
+        plain_item_id = (payload.provider_item_id or "").strip()
+        if not plain_item_id:
             raise HTTPException(
                 status_code=400,
                 detail="Conexão real exige provider_item_id do Pluggy (itemId)"
             )
-        provider_item_id = _encrypt_secret(item_id)
+        _validate_pluggy_item_for_user(plain_item_id, current["id"])
+        _wait_pluggy_item_ready(plain_item_id)
+        provider_item_id_enc = _encrypt_secret(plain_item_id)
 
-    row = {
-        "id": conn_id,
-        "user_id": current["id"],
-        "institution_id": payload.institution_id,
-        "institution_name": institution_name,
-        "status": "syncing",
-        "provider": OPEN_FINANCE_PROVIDER,
-        "provider_item_id": provider_item_id,
-        "last_sync": None,
-        "last_error": None,
-        "created_at": now,
-        "updated_at": now,
-    }
-    supabase.table("bank_connections").insert(row).execute()
+    existing = _find_connection_by_provider_item(current["id"], plain_item_id) if plain_item_id else None
+    if existing:
+        conn_id = existing["id"]
+        supabase.table("bank_connections").update({
+            "institution_id": payload.institution_id,
+            "institution_name": institution_name,
+            "status": "syncing",
+            "last_error": None,
+            "updated_at": now,
+        }).eq("id", conn_id).execute()
+        row = {**existing, "institution_id": payload.institution_id, "institution_name": institution_name, "status": "syncing"}
+    else:
+        conn_id = str(uuid.uuid4())
+        row = {
+            "id": conn_id,
+            "user_id": current["id"],
+            "institution_id": payload.institution_id,
+            "institution_name": institution_name,
+            "status": "syncing",
+            "provider": OPEN_FINANCE_PROVIDER,
+            "provider_item_id": provider_item_id_enc,
+            "last_sync": None,
+            "last_error": None,
+            "created_at": now,
+            "updated_at": now,
+        }
+        supabase.table("bank_connections").insert(row).execute()
 
-    _sync_open_finance_connection(row, current["id"])
+    try:
+        _sync_open_finance_connection(row, current["id"])
+    except HTTPException:
+        pass
+
     listed = await list_open_finance_connections(current)
     found = next((x for x in listed if x.connection.id == conn_id), None)
     if not found:
         raise HTTPException(status_code=500, detail="Conexão criada, mas não foi possível carregar dados")
+    if found.connection.status == "error":
+        raise HTTPException(
+            status_code=502,
+            detail=found.connection.last_error or "Banco conectado, mas a sincronização falhou. Toque em Sync para tentar de novo.",
+        )
     return found
 
 @api_router.post("/open-finance/connections/{connection_id}/sync", response_model=BankConnectionDetailsOut)
@@ -1262,12 +1563,15 @@ async def sync_open_finance_connection(connection_id: str, current=Depends(get_c
 async def sync_all_open_finance(current=Depends(get_current_user)):
     conn_res = supabase.table("bank_connections").select("*").eq("user_id", current["id"]).execute()
     rows = conn_res.data or []
+    results = []
     for conn in rows:
         try:
             _sync_open_finance_connection(conn, current["id"])
-        except Exception:
-            continue
-    return {"ok": True, "connections": len(rows)}
+            results.append({"id": conn["id"], "ok": True})
+        except Exception as e:
+            detail = e.detail if isinstance(e, HTTPException) else str(e)
+            results.append({"id": conn["id"], "ok": False, "error": detail})
+    return {"ok": True, "connections": len(rows), "results": results}
 
 @api_router.delete("/open-finance/connections/{connection_id}")
 async def disconnect_open_finance(connection_id: str, current=Depends(get_current_user)):
@@ -1892,6 +2196,205 @@ async def chat_history(session_id: str, current=Depends(get_current_user)):
     response = supabase.table('chat_messages').select('*').eq('user_id', current['id']).eq('session_id', session_id).order('created_at', asc=True).execute()
     return [{"id": msg['id'], "role": msg['role'], "content": msg['content'], "created_at": msg['created_at']} for msg in response.data]
 
+# ---------- DOCUMENT OCR / SCAN ----------
+
+SCANNED_STORAGE_PREFIX = "scanned_docs"
+_scanned_table_ok: Optional[bool] = None
+
+
+def _migrate_scanned_documents_table() -> bool:
+    url = os.environ.get("DATABASE_URL", "").strip()
+    if not url:
+        return False
+    try:
+        import psycopg2
+        sql_path = ROOT_DIR / "supabase_scanned_documents.sql"
+        sql = sql_path.read_text(encoding="utf-8")
+        statements = [s.strip() for s in sql.split(";") if s.strip() and not s.strip().startswith("--")]
+        conn = psycopg2.connect(url)
+        conn.autocommit = True
+        try:
+            with conn.cursor() as cur:
+                for stmt in statements:
+                    cur.execute(stmt)
+        finally:
+            conn.close()
+        logging.info("scanned_documents table migration applied")
+        return True
+    except Exception as exc:
+        logging.warning("scanned_documents migration skipped: %s", exc)
+        return False
+
+
+def _scanned_documents_table_available() -> bool:
+    global _scanned_table_ok
+    if _scanned_table_ok is not None:
+        return _scanned_table_ok
+    try:
+        supabase.table("scanned_documents").select("id").limit(1).execute()
+        _scanned_table_ok = True
+    except Exception:
+        _scanned_table_ok = False
+    return _scanned_table_ok
+
+
+def _save_scanned_document_storage(scan_doc: dict) -> None:
+    user_id = scan_doc["user_id"]
+    scan_id = scan_doc["id"]
+    path = f"{SCANNED_STORAGE_PREFIX}/{user_id}/{scan_id}.json"
+    supabase.storage.from_("avatars").upload(
+        path,
+        json.dumps(scan_doc, ensure_ascii=False).encode("utf-8"),
+        file_options={"content-type": "application/json", "upsert": "true"},
+    )
+
+
+def _list_scanned_documents_storage(user_id: str) -> List[dict]:
+    try:
+        items = supabase.storage.from_("avatars").list(f"{SCANNED_STORAGE_PREFIX}/{user_id}")
+    except Exception:
+        return []
+    docs: List[dict] = []
+    for item in items or []:
+        name = item.get("name") or ""
+        if not name.endswith(".json"):
+            continue
+        path = f"{SCANNED_STORAGE_PREFIX}/{user_id}/{name}"
+        try:
+            raw = supabase.storage.from_("avatars").download(path)
+            docs.append(json.loads(raw.decode("utf-8")))
+        except Exception:
+            continue
+    docs.sort(key=lambda d: d.get("created_at", ""), reverse=True)
+    return docs[:100]
+
+
+@api_router.post("/documents/parse")
+async def parse_document_ocr(payload: DocumentOcrParseIn, current=Depends(get_current_user)):
+    if not (payload.ocr_text or "").strip():
+        raise HTTPException(status_code=400, detail="Texto OCR vazio. Tente outra foto com boa iluminação.")
+    return _parse_ocr_text(payload.ocr_text)
+
+def _ocr_image_bytes(content: bytes) -> dict:
+    result = _extract_from_image(content)
+    logging.info(
+        "OCR result source=%s est=%s amount=%s ocr_len=%d",
+        result.get("source"),
+        (result.get("establishment") or "")[:40],
+        result.get("amount"),
+        len(result.get("ocr_text") or ""),
+    )
+    return result
+
+
+@api_router.post("/documents/ocr-upload")
+async def ocr_document_upload(file: UploadFile = File(...), current=Depends(get_current_user)):
+    allowed = {"image/jpeg", "image/png", "image/webp", "image/jpg"}
+    content_type = (file.content_type or "image/jpeg").lower()
+    if content_type not in allowed:
+        raise HTTPException(status_code=400, detail="Formato não suportado. Use JPG, PNG ou WEBP.")
+    content = await file.read()
+    if len(content) < 100:
+        raise HTTPException(status_code=400, detail="Imagem inválida ou vazia.")
+    if len(content) > 8 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Imagem muito grande (máx. 8MB).")
+    logging.info("OCR upload user=%s bytes=%d", current["id"], len(content))
+    return await asyncio.to_thread(_ocr_image_bytes, content)
+
+
+@api_router.post("/documents/ocr-base64")
+async def ocr_document_base64(payload: DocumentOcrBase64In, current=Depends(get_current_user)):
+    allowed = {"image/jpeg", "image/png", "image/webp", "image/jpg"}
+    content_type = (payload.content_type or "image/jpeg").lower()
+    if content_type not in allowed:
+        raise HTTPException(status_code=400, detail="Formato não suportado. Use JPG, PNG ou WEBP.")
+    raw = (payload.image_base64 or "").strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Imagem não enviada.")
+    if "," in raw and raw.startswith("data:"):
+        raw = raw.split(",", 1)[1]
+    try:
+        content = base64.b64decode(raw, validate=False)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Imagem inválida ou corrompida.")
+    if len(content) < 100:
+        raise HTTPException(status_code=400, detail="Imagem inválida ou corrompida.")
+    logging.info("OCR base64 user=%s bytes=%d", current["id"], len(content))
+    return await asyncio.to_thread(_ocr_image_bytes, content)
+
+@api_router.post("/documents/confirm", response_model=ScannedDocumentOut)
+async def confirm_scanned_document(payload: DocumentScanConfirmIn, current=Depends(get_current_user)):
+    if not payload.establishment.strip():
+        raise HTTPException(status_code=400, detail="Informe o estabelecimento")
+    if payload.amount <= 0:
+        raise HTTPException(status_code=400, detail="Informe um valor válido")
+
+    now = datetime.now(timezone.utc)
+    tx_id = str(uuid.uuid4())
+    tx_date = payload.transaction_date.isoformat() if payload.transaction_date else now.isoformat()
+
+    tx_doc = {
+        "id": tx_id,
+        "user_id": current["id"],
+        "type": payload.type,
+        "amount": abs(float(payload.amount)),
+        "category": payload.category.strip() or "Compras",
+        "description": payload.establishment.strip(),
+        "date": tx_date,
+        "card_id": None,
+        "created_at": now.isoformat(),
+    }
+    try:
+        supabase.table("transactions").insert(tx_doc).execute()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Erro ao salvar transação: {exc}")
+
+    scan_id = str(uuid.uuid4())
+    scan_doc = {
+        "id": scan_id,
+        "user_id": current["id"],
+        "establishment": payload.establishment.strip(),
+        "amount": abs(float(payload.amount)),
+        "category": payload.category.strip() or "Compras",
+        "transaction_date": tx_date,
+        "ocr_text": payload.ocr_text,
+        "transaction_id": tx_id,
+        "created_at": now.isoformat(),
+    }
+    if _scanned_documents_table_available():
+        try:
+            supabase.table("scanned_documents").insert(scan_doc).execute()
+        except Exception as exc:
+            logging.warning("scanned_documents insert failed, using storage: %s", exc)
+            global _scanned_table_ok
+            _scanned_table_ok = False
+            _save_scanned_document_storage(scan_doc)
+    else:
+        try:
+            _save_scanned_document_storage(scan_doc)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Erro ao salvar documento escaneado: {exc}")
+    return ScannedDocumentOut(**scan_doc)
+
+@api_router.get("/documents/scanned", response_model=List[ScannedDocumentOut])
+async def list_scanned_documents(current=Depends(get_current_user)):
+    if _scanned_documents_table_available():
+        try:
+            res = (
+                supabase.table("scanned_documents")
+                .select("*")
+                .eq("user_id", current["id"])
+                .order("created_at", desc=True)
+                .limit(100)
+                .execute()
+            )
+            return [ScannedDocumentOut(**row) for row in (res.data or [])]
+        except Exception:
+            global _scanned_table_ok
+            _scanned_table_ok = False
+    rows = _list_scanned_documents_storage(current["id"])
+    return [ScannedDocumentOut(**row) for row in rows]
+
 # ---------- FINANCIAL SETTINGS ----------
 
 @api_router.get("/financial-settings")
@@ -2007,6 +2510,19 @@ app.add_middleware(
 )
 
 app.include_router(api_router)
+
+
+@app.on_event("startup")
+async def _on_startup():
+    if _migrate_scanned_documents_table():
+        global _scanned_table_ok
+        _scanned_table_ok = True
+    try:
+        from ocr_vision import warmup_ocr
+        warmup_ocr()
+    except Exception as exc:
+        logging.warning("OCR startup check falhou: %s", exc)
+
 
 @app.get("/")
 async def root_health():

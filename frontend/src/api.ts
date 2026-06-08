@@ -17,40 +17,89 @@ export async function setToken(token: string) {
   await AsyncStorage.setItem('nocker_token', token);
 }
 
+/** Define token em memória na hora; persiste em background. */
+export function setTokenFast(token: string) {
+  _tokenCache = token;
+  AsyncStorage.setItem('nocker_token', token).catch(() => {});
+}
+
 export async function clearToken() {
   _tokenCache = null;
   await AsyncStorage.removeItem('nocker_token');
 }
 
-// Acorda o servidor Railway logo ao importar a API (evita cold start)
-fetch(`${BASE}/health`, { method: 'GET' }).catch(() => {});
+const DEFAULT_TIMEOUT_MS = 15000;
 
-async function request(path: string, opts: RequestInit = {}) {
-  const token = await getToken();
-  const headers: any = {
-    'Content-Type': 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    ...(opts.headers || {}),
-  };
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10000);
-  let res: Response;
-  try {
-    res = await fetch(`${BASE}/api${path}`, { ...opts, headers, signal: controller.signal });
-  } catch (e: any) {
-    if (e?.name === 'AbortError') throw new Error('Servidor indisponível. Verifique se o backend está rodando.');
-    throw e;
-  } finally {
-    clearTimeout(timeout);
+const _inflight = new Map<string, Promise<any>>();
+
+// Acorda o servidor Railway (não bloqueia UI)
+if (BASE) {
+  fetch(`${BASE}/api/`, { method: 'GET' }).catch(() => {});
+}
+
+async function request(path: string, opts: RequestInit = {}, timeoutMs = DEFAULT_TIMEOUT_MS) {
+  const method = (opts.method || 'GET').toUpperCase();
+  const dedupeKey = method === 'GET' ? `GET:${path}` : '';
+  if (dedupeKey && _inflight.has(dedupeKey)) {
+    return _inflight.get(dedupeKey);
   }
-  const text = await res.text();
-  let data: any = null;
-  try { data = text ? JSON.parse(text) : null; } catch { data = text; }
-  if (!res.ok) {
-    const msg = (data && data.detail) || res.statusText || 'Erro';
-    throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+
+  const exec = (async () => {
+    if (!BASE) {
+      throw new Error('Backend não configurado. Verifique EXPO_PUBLIC_BACKEND_URL no .env');
+    }
+    const token = await getToken();
+    const headers: any = {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(opts.headers || {}),
+    };
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    let res: Response;
+    try {
+      res = await fetch(`${BASE}/api${path}`, { ...opts, headers, signal: controller.signal });
+    } catch (e: any) {
+      const msg = String(e?.message || '');
+      if (e?.name === 'AbortError') {
+        throw new Error('O servidor demorou para responder. Verifique sua internet e tente de novo.');
+      }
+      if (msg.includes('Network request failed') || msg.includes('Failed to fetch')) {
+        throw new Error('Sem conexão com o servidor. Verifique sua internet ou Wi‑Fi.');
+      }
+      throw e;
+    } finally {
+      clearTimeout(timeout);
+    }
+    const text = await res.text();
+    let data: any = null;
+    try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+    if (!res.ok) {
+      const msg = (data && data.detail) || res.statusText || 'Erro';
+      const err: any = new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+      err.status = res.status;
+      throw err;
+    }
+    return data;
+  })();
+
+  if (dedupeKey) {
+    _inflight.set(dedupeKey, exec);
+    exec.finally(() => { _inflight.delete(dedupeKey); });
   }
-  return data;
+  return exec;
+}
+
+export function isAuthError(error: any): boolean {
+  const status = error?.status;
+  if (status === 401 || status === 403) return true;
+  const msg = String(error?.message || '').toLowerCase();
+  return (
+    msg.includes('invalid token') ||
+    msg.includes('unauthorized') ||
+    msg.includes('não autorizado') ||
+    msg.includes('sessão expirada')
+  );
 }
 
 const OF_MOCK_KEY = 'nocker_of_mock_connections_v1';
@@ -99,45 +148,6 @@ async function saveOpenFinanceMock(rows: any[]): Promise<void> {
   } catch {
     // ignore
   }
-}
-
-function buildMockConnection(institution_id: string, institution_name?: string): any {
-  const now = new Date().toISOString();
-  const id = `mock-${institution_id}-${Date.now()}`;
-  const instName = institution_name || OF_INSTITUTIONS.find((i) => i.id === institution_id)?.name || institution_id;
-  return {
-    connection: {
-      id,
-      user_id: 'local-user',
-      institution_id,
-      institution_name: instName,
-      status: 'connected',
-      last_sync: now,
-      created_at: now,
-    },
-    accounts: [
-      {
-        id: `acc-${id}-1`,
-        connection_id: id,
-        account_name: 'Conta Corrente',
-        account_type: 'checking',
-        balance: 3520.74,
-        currency: 'BRL',
-      },
-    ],
-    cards: [
-      {
-        id: `card-${id}-1`,
-        connection_id: id,
-        card_name: `${instName} Platinum`,
-        card_brand: 'visa',
-        limit_total: 9000,
-        limit_available: 5400,
-        invoice_amount: 3600,
-        due_date: '15',
-      },
-    ],
-  };
 }
 
 export const api = {
@@ -195,6 +205,19 @@ export const api = {
   listTransactions: () => request('/transactions'),
   createTransaction: (data: any) =>
     request('/transactions', { method: 'POST', body: JSON.stringify(data) }),
+  createNotificationTransaction: (data: {
+    amount: number;
+    type: 'income' | 'expense';
+    description: string;
+    bank?: string;
+    raw?: string;
+  }) => request('/transactions/from-notification', { method: 'POST', body: JSON.stringify(data) }),
+  refreshTransactionsCache: async () => {
+    const txs = await request('/transactions');
+    const { cacheSet } = await import('./cache');
+    await cacheSet('transactions_bundle', { txs, cats: [] });
+    return txs;
+  },
   updateTransaction: (id: string, data: any) =>
     request(`/transactions/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteTransaction: (id: string) =>
@@ -226,11 +249,21 @@ export const api = {
       };
     }
   },
-  createOpenFinanceConnectToken: async (clientUserId: string) => {
-    return request('/open-finance/connect-token', {
+  createOpenFinanceConnectToken: async (_clientUserId?: string) => {
+    const opts = {
       method: 'POST',
-      body: JSON.stringify({ client_user_id: clientUserId }),
-    });
+      body: JSON.stringify({}),
+    };
+    try {
+      return await request('/open-finance/connect-token', opts, 60000);
+    } catch (e: any) {
+      const msg = String(e?.message || '');
+      if (msg.includes('demorou') || msg.includes('internet')) {
+        await fetch(`${BASE}/api/`, { method: 'GET' }).catch(() => {});
+        return request('/open-finance/connect-token', opts, 60000);
+      }
+      throw e;
+    }
   },
   getOpenFinanceRuntimeMode: () => _ofRuntimeMode,
   listOpenFinanceInstitutions: async () => {
@@ -256,37 +289,17 @@ export const api = {
     }
   },
   connectOpenFinanceBank: async (institution_id: string, institution_name?: string, provider_item_id?: string) => {
-    try {
-      return await request('/open-finance/connections/connect', {
+    return request(
+      '/open-finance/connections/connect',
+      {
         method: 'POST',
         body: JSON.stringify({ institution_id, institution_name, provider_item_id }),
-      });
-    } catch (e: any) {
-      if (!canUseFallback(e)) throw e;
-      markOpenFinanceMode('mock-fallback');
-      const rows = await loadOpenFinanceMock();
-      const created = buildMockConnection(institution_id, institution_name);
-      const next = [created, ...rows.filter((r) => r?.connection?.institution_id !== institution_id)];
-      await saveOpenFinanceMock(next);
-      return created;
-    }
+      },
+      120000,
+    );
   },
   syncOpenFinanceConnection: async (connectionId: string) => {
-    try {
-      return await request(`/open-finance/connections/${connectionId}/sync`, { method: 'POST' });
-    } catch (e: any) {
-      if (!canUseFallback(e)) throw e;
-      markOpenFinanceMode('mock-fallback');
-      const rows = await loadOpenFinanceMock();
-      const now = new Date().toISOString();
-      const next = rows.map((r) =>
-        r?.connection?.id === connectionId
-          ? { ...r, connection: { ...r.connection, status: 'connected', last_sync: now } }
-          : r
-      );
-      await saveOpenFinanceMock(next);
-      return next.find((r) => r?.connection?.id === connectionId) || null;
-    }
+    return request(`/open-finance/connections/${connectionId}/sync`, { method: 'POST' }, 120000);
   },
   syncOpenFinanceAll: async () => {
     try {
@@ -301,17 +314,19 @@ export const api = {
       return { ok: true, connections: next.length };
     }
   },
-  disconnectOpenFinanceConnection: async (connectionId: string) => {
+  syncBanksAndRefresh: async () => {
     try {
-      return await request(`/open-finance/connections/${connectionId}`, { method: 'DELETE' });
-    } catch (e: any) {
-      if (!canUseFallback(e)) throw e;
-      markOpenFinanceMode('mock-fallback');
-      const rows = await loadOpenFinanceMock();
-      const next = rows.filter((r) => r?.connection?.id !== connectionId);
-      await saveOpenFinanceMock(next);
-      return { ok: true };
+      await request('/open-finance/sync-all', { method: 'POST' });
+    } catch {
+      /* sem bancos conectados */
     }
+    const txs = await request('/transactions');
+    const { cacheSet } = await import('./cache');
+    await cacheSet('transactions_bundle', { txs, cats: [] });
+    return txs;
+  },
+  disconnectOpenFinanceConnection: async (connectionId: string) => {
+    return request(`/open-finance/connections/${connectionId}`, { method: 'DELETE' });
   },
 
   // goals
@@ -402,7 +417,104 @@ export const api = {
         personality: opts?.personality,
       }),
     }),
-  chatHistory: (session_id: string) => request(`/chat/history/${session_id}`),
+  // document scan
+  confirmScannedDocument: (data: {
+    establishment: string;
+    amount: number;
+    category: string;
+    transaction_date: string;
+    ocr_text?: string;
+    type?: 'income' | 'expense';
+  }) => request('/documents/confirm', { method: 'POST', body: JSON.stringify(data) }),
+  listScannedDocuments: () => request('/documents/scanned', {}, 30000),
+  wakeServer: async () => {
+    if (!BASE) return;
+    try {
+      await fetch(`${BASE}/api/`, { method: 'GET' });
+    } catch {
+      /* ignora — só acorda o Railway */
+    }
+  },
+  scanDocumentUpload: async (uri: string) => {
+    const token = await getToken();
+    if (!token) throw new Error('Faça login para escanear documentos.');
+    if (!BASE) throw new Error('Backend não configurado. Verifique EXPO_PUBLIC_BACKEND_URL no .env');
+
+    const formData = new FormData();
+    formData.append('file', { uri, name: 'receipt.jpg', type: 'image/jpeg' } as any);
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 120000);
+    let res: Response;
+    try {
+      res = await fetch(`${BASE}/api/documents/ocr-upload`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+        signal: controller.signal,
+      });
+    } catch (e: any) {
+      if (e?.name === 'AbortError') {
+        throw new Error('A análise demorou demais. Tente novamente com boa iluminação.');
+      }
+      const msg = String(e?.message || '');
+      if (msg.includes('Network request failed') || msg.includes('Failed to fetch')) {
+        throw new Error('Sem conexão com o servidor. Verifique sua internet ou Wi‑Fi.');
+      }
+      throw e;
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    const text = await res.text();
+    let data: any = null;
+    try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+    if (!res.ok) {
+      const msg = (data && data.detail) || res.statusText || 'Erro ao analisar nota';
+      throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+    }
+    return data;
+  },
+  scanDocumentImage: async (image_base64: string) => {
+    const token = await getToken();
+    if (!token) throw new Error('Faça login para escanear documentos.');
+    if (!BASE) throw new Error('Backend não configurado. Verifique EXPO_PUBLIC_BACKEND_URL no .env');
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 120000);
+    let res: Response;
+    try {
+      res = await fetch(`${BASE}/api/documents/ocr-base64`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ image_base64, content_type: 'image/jpeg' }),
+        signal: controller.signal,
+      });
+    } catch (e: any) {
+      if (e?.name === 'AbortError') {
+        throw new Error('A leitura da nota demorou demais. Tente de novo — o servidor pode estar iniciando.');
+      }
+      const msg = String(e?.message || '');
+      if (msg.includes('Network request failed') || msg.includes('Failed to fetch')) {
+        throw new Error('Sem conexão com o servidor. Verifique sua internet ou Wi‑Fi.');
+      }
+      throw e;
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    const text = await res.text();
+    let data: any = null;
+    try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+    if (!res.ok) {
+      const msg = (data && data.detail) || res.statusText || 'Erro ao analisar nota';
+      throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+    }
+    return data;
+  },
 
   // financial settings
   getFinancialSettings: () => request('/financial-settings'),
