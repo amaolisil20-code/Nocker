@@ -1,0 +1,193 @@
+import React, { useCallback, useState } from 'react';
+import {
+  View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Modal,
+  KeyboardAvoidingView, Platform, Alert,
+} from 'react-native';
+import { useFocusEffect } from 'expo-router';
+import { useCachedLoad } from '../../src/useCachedLoad';
+import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { api } from '../../src/api';
+import { staleWhileRevalidate } from '../../src/cache';
+import { fmtBRL } from '../../src/theme';
+import { useTheme } from '../../src/ThemeContext';
+import { SubHeader } from '../../src/components/SubHeader';
+
+const COLORS = ['#EF4444', '#F59E0B', '#3B82F6', '#8B5CF6', '#16A34A', '#EC4899'];
+
+export default function FixedExpenses() {
+  const insets = useSafeAreaInsets();
+  const { colors } = useTheme();
+  const s = makeStyles(colors);
+  const [items, setItems] = useState<any[]>([]);
+  const [categories, setCategories] = useState<any[]>([]);
+  const [modal, setModal] = useState(false);
+  const [name, setName] = useState('');
+  const [amount, setAmount] = useState('');
+  const [dueDay, setDueDay] = useState('');
+  const [category, setCategory] = useState('');
+  const [color, setColor] = useState(COLORS[0]);
+  const [saving, setSaving] = useState(false);
+
+  const expenseCategories = categories.filter(c => c.type === 'expense').map(c => c.name);
+
+  const load = async () => {
+    try {
+      const [fixed, cats] = await Promise.all([api.listFixedExpenses(), api.listCategories()]);
+      setItems(fixed);
+      setCategories(cats);
+    } catch { /* ignore */ }
+  };
+  useCachedLoad('fixed_expenses_data', load, () => {});
+
+  const save = async () => {
+    if (!name.trim()) return Alert.alert('Atenção', 'Informe um nome');
+    const v = parseFloat(amount.replace(',', '.'));
+    const d = parseInt(dueDay);
+    if (!v || v <= 0) return Alert.alert('Atenção', 'Valor inválido');
+    if (!d || d < 1 || d > 31) return Alert.alert('Atenção', 'Dia inválido (1-31)');
+    if (!category) return Alert.alert('Atenção', 'Selecione uma categoria. Crie categorias na aba Categorias.');
+    setSaving(true);
+    try {
+      await api.createFixedExpense({ name: name.trim(), amount: v, due_day: d, category, color, active: true });
+      setModal(false); setName(''); setAmount(''); setDueDay(''); setCategory('');
+      await load();
+    } catch (e: any) { Alert.alert('Erro', e.message); } finally { setSaving(false); }
+  };
+
+  const toggle = async (item: any) => {
+    await api.updateFixedExpense(item.id, { active: !item.active });
+    await load();
+  };
+  const remove = (id: string) =>
+    Alert.alert('Excluir', 'Excluir gasto fixo?', [
+      { text: 'Cancelar' },
+      { text: 'Excluir', style: 'destructive', onPress: async () => { await api.deleteFixedExpense(id); await load(); } },
+    ]);
+
+  const total = items.filter(i => i.active).reduce((s, i) => s + i.amount, 0);
+
+  return (
+    <View style={[s.c, { paddingTop: insets.top + 12 }]}>
+      <SubHeader title="Gastos Fixos" subtitle="Contas mensais recorrentes" onAdd={() => { setCategory(''); setModal(true); }} addTestID="add-fixed" />
+
+      <ScrollView contentContainerStyle={{ paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
+        <View style={s.totalCard}>
+          <Text style={s.totalLabel}>Total mensal ativo</Text>
+          <Text style={s.totalVal}>{fmtBRL(total)}</Text>
+          <Text style={s.totalSub}>{items.filter(i => i.active).length} de {items.length} ativos</Text>
+        </View>
+
+        {items.length === 0 && (
+          <View style={s.empty}>
+            <Ionicons name="calendar-outline" size={48} color={colors.textTertiary} />
+            <Text style={s.emptyTxt}>Nenhum gasto fixo</Text>
+            <Text style={s.emptySub}>Adicione contas recorrentes (aluguel, luz, internet)</Text>
+          </View>
+        )}
+
+        {items.map(item => (
+          <TouchableOpacity key={item.id} style={s.row} onPress={() => toggle(item)} onLongPress={() => remove(item.id)} activeOpacity={0.85}>
+            <View style={[s.itemIcon, { backgroundColor: `${item.color}22`, borderColor: `${item.color}55`, opacity: item.active ? 1 : 0.5 }]}>
+              <Ionicons name="calendar" size={20} color={item.color} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[s.itemName, !item.active && { color: colors.textTertiary }]}>{item.name}</Text>
+              <Text style={s.itemSub}>{item.category} • dia {item.due_day}</Text>
+            </View>
+            <View style={{ alignItems: 'flex-end' }}>
+              <Text style={[s.itemAmt, !item.active && { color: colors.textTertiary }]}>{fmtBRL(item.amount)}</Text>
+              <Text style={[s.statusPill, item.active ? s.statusActive : s.statusInactive]}>
+                {item.active ? 'ativo' : 'pausado'}
+              </Text>
+            </View>
+          </TouchableOpacity>
+        ))}
+        {items.length > 0 && <Text style={s.hint}>Toque para ativar/pausar • Pressione e segure para excluir</Text>}
+      </ScrollView>
+
+      <Modal visible={modal} transparent animationType="slide" onRequestClose={() => setModal(false)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.modalRoot}>
+          <TouchableOpacity style={{ flex: 1 }} onPress={() => setModal(false)} />
+          <ScrollView style={s.sheet} contentContainerStyle={{ paddingBottom: 24 }} keyboardShouldPersistTaps="handled">
+            <View style={s.sheetHandle} />
+            <Text style={s.sheetTitle}>Novo gasto fixo</Text>
+
+            <Text style={s.label}>Nome</Text>
+            <TextInput testID="fe-name" placeholder="Ex: Aluguel, Internet..." placeholderTextColor={colors.textTertiary}
+              value={name} onChangeText={setName} style={s.input} />
+
+            <Text style={s.label}>Valor mensal</Text>
+            <TextInput testID="fe-amount" placeholder="0,00" placeholderTextColor={colors.textTertiary}
+              value={amount} onChangeText={setAmount} keyboardType="decimal-pad" style={s.input} />
+
+            <Text style={s.label}>Dia do vencimento</Text>
+            <TextInput placeholder="1-31" placeholderTextColor={colors.textTertiary}
+              value={dueDay} onChangeText={setDueDay} keyboardType="number-pad" style={s.input} />
+
+            <Text style={s.label}>Categoria</Text>
+            {expenseCategories.length === 0 ? (
+              <Text style={s.noCatHint}>Nenhuma categoria de despesa. Crie na aba Categorias.</Text>
+            ) : (
+              <View style={s.chipRow}>
+                {expenseCategories.map(c => (
+                  <TouchableOpacity key={c} style={[s.chip, category === c && s.chipActive]} onPress={() => setCategory(c)}>
+                    <Text style={[s.chipTxt, category === c && { color: '#fff' }]}>{c}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+
+            <Text style={s.label}>Cor</Text>
+            <View style={s.chipRow}>
+              {COLORS.map(c => (
+                <TouchableOpacity key={c} onPress={() => setColor(c)} style={[s.colorDot, { backgroundColor: c }, color === c && s.colorActive]} />
+              ))}
+            </View>
+
+            <TouchableOpacity testID="save-fe" style={s.saveBtn} onPress={save} disabled={saving}>
+              <Text style={s.saveTxt}>{saving ? 'Salvando...' : 'Salvar'}</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </Modal>
+    </View>
+  );
+}
+
+const makeStyles = (colors: any) => StyleSheet.create({
+  c: { flex: 1, backgroundColor: colors.bg, paddingHorizontal: 20 },
+  totalCard: { backgroundColor: colors.surface, borderRadius: 20, padding: 18, borderWidth: 1, borderColor: colors.border, marginBottom: 16 },
+  totalLabel: { color: colors.textSecondary, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.6 },
+  totalVal: { color: '#fff', fontSize: 30, fontWeight: '800', letterSpacing: -0.6, marginTop: 4 },
+  totalSub: { color: colors.textTertiary, fontSize: 12, marginTop: 4 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, marginVertical: 4,
+    backgroundColor: colors.surface, borderRadius: 16, borderWidth: 1, borderColor: colors.border },
+  itemIcon: { width: 42, height: 42, borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
+  itemName: { color: '#fff', fontSize: 14, fontWeight: '600' },
+  itemSub: { color: colors.textTertiary, fontSize: 11, marginTop: 2 },
+  itemAmt: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  statusPill: { fontSize: 10, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999, marginTop: 4, overflow: 'hidden', fontWeight: '700' },
+  statusActive: { color: colors.primary, backgroundColor: colors.successSoft },
+  statusInactive: { color: colors.textTertiary, backgroundColor: 'rgba(255,255,255,0.05)' },
+  hint: { color: colors.textTertiary, fontSize: 10, textAlign: 'center', marginTop: 16 },
+  empty: { alignItems: 'center', paddingVertical: 60, gap: 6 },
+  emptyTxt: { color: '#fff', fontSize: 15, fontWeight: '600', marginTop: 12 },
+  emptySub: { color: colors.textTertiary, fontSize: 12, textAlign: 'center', paddingHorizontal: 40 },
+  modalRoot: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
+  sheet: { backgroundColor: colors.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 22, maxHeight: '90%' },
+  sheetHandle: { width: 44, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: 'center', marginBottom: 14 },
+  sheetTitle: { color: '#fff', fontSize: 20, fontWeight: '700', marginBottom: 16 },
+  label: { color: colors.textSecondary, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 12, marginBottom: 8 },
+  input: { backgroundColor: colors.surfaceElevated, borderRadius: 14, paddingHorizontal: 14, height: 48, color: '#fff',
+    borderWidth: 1, borderColor: colors.border, fontSize: 15 },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceElevated },
+  chipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  chipTxt: { color: colors.textSecondary, fontSize: 12, fontWeight: '600' },
+  noCatHint: { color: colors.textTertiary, fontSize: 12, lineHeight: 18, marginBottom: 8 },
+  colorDot: { width: 36, height: 36, borderRadius: 18, borderWidth: 2, borderColor: 'transparent' },
+  colorActive: { borderColor: '#fff' },
+  saveBtn: { backgroundColor: colors.primary, borderRadius: 999, height: 52, alignItems: 'center', justifyContent: 'center', marginTop: 20 },
+  saveTxt: { color: '#fff', fontWeight: '700', fontSize: 15 },
+});
