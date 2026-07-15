@@ -17,6 +17,11 @@ type WidgetMessage =
   | { type: 'error'; message?: string }
   | { type: 'close' };
 
+// Enquanto o Nocker usa credenciais sandbox do Pluggy (antes da certificação
+// de produção em Open Finance), esta env var precisa estar true para os
+// bancos de teste do Pluggy aparecerem no widget. Ver EXPO_PUBLIC_OPEN_FINANCE_SANDBOX no .env.
+const INCLUDE_SANDBOX = process.env.EXPO_PUBLIC_OPEN_FINANCE_SANDBOX === 'true';
+
 function buildHtml(connectToken: string, institutionName?: string) {
   const title = institutionName ? `Conectando ${institutionName}` : 'Conectando conta';
 
@@ -122,7 +127,7 @@ function buildHtml(connectToken: string, institutionName?: string) {
 
           var pluggyConnect = new PluggyConnect({
             connectToken: ${JSON.stringify(connectToken)},
-            includeSandbox: false,
+            includeSandbox: ${JSON.stringify(INCLUDE_SANDBOX)},
             onOpen: function () {
               var spinner = document.getElementById('spinner');
               if (spinner) spinner.style.display = 'none';

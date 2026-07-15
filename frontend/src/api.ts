@@ -156,8 +156,8 @@ export const api = {
     request('/auth/register', { method: 'POST', body: JSON.stringify({ name, email, password }) }),
   login: (email: string, password: string) =>
     request('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
-  googleLogin: (google_id: string, email: string, name: string, avatar_url?: string) =>
-    request('/auth/google', { method: 'POST', body: JSON.stringify({ google_id, email, name, avatar_url }) }),
+  googleLogin: (access_token: string) =>
+    request('/auth/google', { method: 'POST', body: JSON.stringify({ access_token }) }),
   me: () => request('/auth/me'),
   updateProfile: (data: { name?: string; username?: string; phone?: string; birth_date?: string; avatar_url?: string }) =>
     request('/auth/profile', { method: 'PATCH', body: JSON.stringify(data) }),

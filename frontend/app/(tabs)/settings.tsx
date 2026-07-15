@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert,
   Switch, Modal, TextInput, KeyboardAvoidingView, Platform, Image,
-  ActivityIndicator,
+  ActivityIndicator, Linking,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
@@ -16,6 +16,17 @@ import {
   getAiSettings, saveAiSettings,
 } from '../../src/aiSettings';
 import * as ImagePicker from 'expo-image-picker';
+import { Paths, File } from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
+
+const SUPPORT_EMAIL = 'amaolisil20@gmail.com';
+
+function openSupportEmail(subject: string) {
+  const url = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(subject)}`;
+  Linking.openURL(url).catch(() => {
+    Alert.alert('Não foi possível abrir o e-mail', `Envie sua mensagem para ${SUPPORT_EMAIL}.`);
+  });
+}
 
 // ─────────────────────────────────────────────────────────────
 // Helpers
@@ -138,6 +149,9 @@ export default function Settings() {
   const [vibrationEnabled, setVibrationEnabled] = useState(true);
   const [alerts, setAlerts] = useState<SpendingAlert[]>([]);
   const [savingAlert, setSavingAlert] = useState<string | null>(null);
+
+  // Exportar dados
+  const [exporting, setExporting] = useState(false);
 
   // Segurança
   const [securityModal, setSecurityModal] = useState(false);
@@ -471,6 +485,44 @@ export default function Settings() {
     }
   };
 
+  // ── Exportar dados ──────────────────────────────────────────
+  const handleExportData = async () => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const txs = await api.listTransactions();
+      if (!txs || txs.length === 0) {
+        Alert.alert('Nada para exportar', 'Você ainda não tem transações registradas.');
+        return;
+      }
+      const escapeCsv = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+      const header = ['Data', 'Tipo', 'Categoria', 'Descrição', 'Valor'].map(escapeCsv).join(';');
+      const rows = txs.map((tx: any) => [
+        new Date(tx.date).toLocaleDateString('pt-BR'),
+        tx.type === 'income' ? 'Receita' : 'Despesa',
+        tx.category,
+        tx.description,
+        Number(tx.amount).toFixed(2).replace('.', ','),
+      ].map(escapeCsv).join(';'));
+      // BOM no início ajuda o Excel a abrir os acentos corretamente
+      const csv = '﻿' + [header, ...rows].join('\n');
+
+      const file = new File(Paths.cache, `nocker-transacoes-${Date.now()}.csv`);
+      file.create({ overwrite: true });
+      file.write(csv);
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(file.uri, { mimeType: 'text/csv', dialogTitle: 'Exportar transações' });
+      } else {
+        Alert.alert('Exportado', `Arquivo salvo em: ${file.uri}`);
+      }
+    } catch (e: any) {
+      Alert.alert('Erro ao exportar', e.message || 'Não foi possível exportar seus dados.');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   // ── Save Geral ───────────────────────────────────────────────
   const saveFinancialGeral = async () => {
     setSavingFinancial(true);
@@ -702,8 +754,13 @@ export default function Settings() {
         {/* More section */}
         <Text style={s.section}>{t.more}</Text>
         <View style={s.group}>
-          <Item icon="cloud-upload-outline" label={t.export}  hint={t.exportHint}  onPress={() => Alert.alert(t.comingSoon, '')} />
-          <Item icon="link-outline"         label={t.banking} hint={t.bankingHint} onPress={() => Alert.alert(t.comingSoon, '')} />
+          <Item
+            icon="cloud-upload-outline" label={t.export} hint={t.exportHint}
+            onPress={handleExportData}
+            right={exporting ? <ActivityIndicator size="small" color={colors.primary} /> : undefined}
+          />
+          <Item icon="link-outline" label={t.banking} hint={t.bankingHint}
+            onPress={() => router.push({ pathname: '/(tabs)/cards', params: { open: 'bank' } })} />
           <Item icon="help-circle-outline"  label={t.help}    hint={t.helpHint}    onPress={() => setHelpModal(true)} />
         </View>
 
@@ -1244,7 +1301,7 @@ export default function Settings() {
             <ScrollView showsVerticalScrollIndicator={false}>
               {/* Central de ajuda */}
               <View style={s.helpGroup}>
-                <TouchableOpacity style={s.helpRow} onPress={() => Alert.alert('Central de ajuda', 'Em breve disponível.')} activeOpacity={0.8}>
+                <TouchableOpacity style={s.helpRow} onPress={() => openSupportEmail('Ajuda com o Nocker')} activeOpacity={0.8}>
                   <View style={s.helpRowIcon}>
                     <Ionicons name="help-buoy-outline" size={18} color={colors.primary} />
                   </View>
@@ -1256,7 +1313,7 @@ export default function Settings() {
                 </TouchableOpacity>
 
                 {/* Reportar bug */}
-                <TouchableOpacity style={s.helpRow} onPress={() => Alert.alert('Reportar bug', 'Em breve disponível.')} activeOpacity={0.8}>
+                <TouchableOpacity style={s.helpRow} onPress={() => openSupportEmail('Relatório de bug — Nocker')} activeOpacity={0.8}>
                   <View style={s.helpRowIcon}>
                     <Ionicons name="bug-outline" size={18} color={colors.primary} />
                   </View>
@@ -1268,7 +1325,7 @@ export default function Settings() {
                 </TouchableOpacity>
 
                 {/* Sugerir funcionalidade */}
-                <TouchableOpacity style={s.helpRow} onPress={() => Alert.alert('Sugerir funcionalidade', 'Em breve disponível.')} activeOpacity={0.8}>
+                <TouchableOpacity style={s.helpRow} onPress={() => openSupportEmail('Sugestão de funcionalidade — Nocker')} activeOpacity={0.8}>
                   <View style={s.helpRowIcon}>
                     <Ionicons name="bulb-outline" size={18} color={colors.primary} />
                   </View>
@@ -1294,7 +1351,7 @@ export default function Settings() {
 
               {/* Legal */}
               <View style={[s.helpGroup, { marginTop: 12 }]}>
-                <TouchableOpacity style={s.helpRow} onPress={() => Alert.alert('Termos de uso', 'Em breve disponível.')} activeOpacity={0.8}>
+                <TouchableOpacity style={s.helpRow} onPress={() => { setHelpModal(false); router.push('/terms'); }} activeOpacity={0.8}>
                   <View style={s.helpRowIcon}>
                     <Ionicons name="document-text-outline" size={18} color={colors.primary} />
                   </View>
@@ -1305,7 +1362,7 @@ export default function Settings() {
                   <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
                 </TouchableOpacity>
 
-                <TouchableOpacity style={[s.helpRow, { borderBottomWidth: 0 }]} onPress={() => Alert.alert('Política de privacidade', 'Em breve disponível.')} activeOpacity={0.8}>
+                <TouchableOpacity style={[s.helpRow, { borderBottomWidth: 0 }]} onPress={() => { setHelpModal(false); router.push('/privacy'); }} activeOpacity={0.8}>
                   <View style={s.helpRowIcon}>
                     <Ionicons name="shield-outline" size={18} color={colors.primary} />
                   </View>

@@ -34,11 +34,13 @@ yarn install
 yarn start
 ```
 
-O `.env` já está configurado com `EXPO_PUBLIC_BACKEND_URL=http://localhost:8000`. Ajuste para o IP local da máquina se for testar num celular físico via Expo Go.
+Por padrão o `.env` aponta para o backend de produção (Render). Para rodar contra o backend local do passo 2, troque `EXPO_PUBLIC_BACKEND_URL` para `http://localhost:8000` (ou o IP local da máquina, se for testar num celular físico via Expo Go).
 
 ## Deploy
 
-O `Dockerfile` e `railway.json` na raiz do projeto fazem o build do backend (contexto = raiz do repo, copiando `backend/`). Configure o serviço no Railway apontando para a raiz do repositório, com as variáveis de ambiente de `backend/.env.example`.
+O backend em produção roda no **Render**, com build via `Dockerfile` (contexto = raiz do repo, copiando `backend/`). Configure o serviço apontando para a raiz do repositório, com as variáveis de ambiente de `backend/.env.example`.
+
+O `railway.json` na raiz é um config de deploy alternativo para Railway, sem uso atualmente — o Railway não está ativo (a URL antiga não existe mais).
 
 ## Observações
 

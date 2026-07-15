@@ -17,7 +17,7 @@ type AuthCtx = {
   user: User | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  loginWithGoogle: (google_id: string, email: string, name: string, avatar_url?: string) => Promise<void>;
+  loginWithGoogle: (access_token: string) => Promise<void>;
   register: (name: string, email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
@@ -72,8 +72,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(r.user);
   };
 
-  const loginWithGoogle = async (google_id: string, email: string, name: string, avatar_url?: string) => {
-    const r = await api.googleLogin(google_id, email, name, avatar_url);
+  const loginWithGoogle = async (access_token: string) => {
+    const r = await api.googleLogin(access_token);
     await setToken(r.token);
     await cacheSet('user_me', r.user);
     setUser(r.user);

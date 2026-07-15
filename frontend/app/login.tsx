@@ -50,22 +50,17 @@ export default function Login() {
 
         if (accessToken) {
           setGoogleBusy(true);
-          const { data: sessionData, error: sessionError } = await supabase.auth.setSession({
+          const { error: sessionError } = await supabase.auth.setSession({
             access_token: accessToken,
             refresh_token: refreshToken || '',
           });
           if (sessionError) throw sessionError;
 
-          const googleUser = sessionData?.user;
-          if (googleUser?.email) {
-            await loginWithGoogle(
-              googleUser.id,
-              googleUser.email,
-              googleUser.user_metadata?.full_name || googleUser.email.split('@')[0],
-              googleUser.user_metadata?.avatar_url,
-            );
-            router.replace('/(tabs)/dashboard');
-          }
+          // O backend valida o accessToken diretamente com o Supabase e
+          // extrai email/nome/avatar de lá — nunca confiamos em dados
+          // vindos do cliente para identificar o usuário.
+          await loginWithGoogle(accessToken);
+          router.replace('/(tabs)/dashboard');
         }
       } catch (e: any) {
         Alert.alert('Erro', e.message || 'Não foi possível entrar com Google');
@@ -129,22 +124,14 @@ export default function Login() {
         const refreshToken = params.get('refresh_token');
 
         if (accessToken) {
-          const { data: sessionData, error: sessionError } = await supabase.auth.setSession({
+          const { error: sessionError } = await supabase.auth.setSession({
             access_token: accessToken,
             refresh_token: refreshToken || '',
           });
           if (sessionError) throw sessionError;
 
-          const googleUser = sessionData?.user;
-          if (googleUser?.email) {
-            await loginWithGoogle(
-              googleUser.id,
-              googleUser.email,
-              googleUser.user_metadata?.full_name || googleUser.email.split('@')[0],
-              googleUser.user_metadata?.avatar_url,
-            );
-            router.replace('/(tabs)/dashboard');
-          }
+          await loginWithGoogle(accessToken);
+          router.replace('/(tabs)/dashboard');
         } else {
           Alert.alert('Erro', 'Não foi possível obter o token de acesso');
         }

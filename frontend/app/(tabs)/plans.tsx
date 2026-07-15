@@ -90,12 +90,8 @@ export default function Plans() {
   const handleSubscribe = (plan: typeof PLANS[0]) => {
     if (plan.btnDisabled) return;
     Alert.alert(
-      `Assinar ${plan.name}`,
-      `Você será redirecionado para assinar o plano ${plan.name} por ${plan.price}/mês.`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        { text: 'Continuar', onPress: () => Alert.alert('Em breve', 'Pagamentos serão disponibilizados em breve!') },
-      ]
+      'Pagamentos ainda não disponíveis',
+      `O plano ${plan.name} ainda não pode ser assinado — o Nocker ainda não tem um meio de pagamento integrado. Continue usando o plano gratuito por enquanto; você será avisado assim que os planos pagos estiverem disponíveis.`,
     );
   };
 

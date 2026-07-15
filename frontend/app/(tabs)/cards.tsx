@@ -74,7 +74,10 @@ export default function Cards() {
   };
 
   useCachedLoad('cards_data', load, () => {});
-  useEffect(() => { if (params.open) setModal(true); }, [params.open]);
+  useEffect(() => {
+    if (params.open === 'bank') openBankConnect();
+    else if (params.open) setModal(true);
+  }, [params.open]);
 
   const openBankConnect = async () => {
     if (!user) {

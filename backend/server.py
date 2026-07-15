@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, File, UploadFile
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, File, UploadFile, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -9,9 +9,11 @@ import json
 import ast
 import base64
 import hashlib
+import secrets
 import bcrypt
 import jwt
 import requests
+from collections import defaultdict, deque
 from pathlib import Path
 from pydantic import BaseModel, Field, EmailStr
 from typing import List, Optional, Literal
@@ -47,6 +49,12 @@ PLUGGY_BASE_URL = os.environ.get('PLUGGY_BASE_URL', 'https://api.pluggy.ai')
 PLUGGY_CLIENT_ID = os.environ.get('PLUGGY_CLIENT_ID', '')
 PLUGGY_CLIENT_SECRET = os.environ.get('PLUGGY_CLIENT_SECRET', '')
 OF_TOKEN_KEY = os.environ.get('OF_TOKEN_KEY', '')
+# Chave(s) antiga(s) do Open Finance, separadas por vírgula. Usadas só como
+# fallback para DESCRIPTOGRAFAR dados já existentes durante uma rotação de
+# OF_TOKEN_KEY — nunca para criptografar. Remova depois que o script
+# scripts/rotate_of_token_key.py confirmar que todos os registros foram
+# migrados para a chave nova.
+OF_TOKEN_KEY_LEGACY = os.environ.get('OF_TOKEN_KEY_LEGACY', '')
 
 app = FastAPI(title="Nocker API")
 api_router = APIRouter(prefix="/api")
@@ -91,10 +99,7 @@ class AuthResponse(BaseModel):
     user: UserOut
 
 class GoogleLogin(BaseModel):
-    google_id: str
-    email: EmailStr
-    name: str
-    avatar_url: Optional[str] = None
+    access_token: str
 
 class TransactionCreate(BaseModel):
     type: Literal['income', 'expense']
@@ -395,6 +400,33 @@ def verify_password(pw: str, hashed: str) -> bool:
     except Exception:
         return False
 
+# ---------- RATE LIMITING (login) ----------
+# Contador em memória de tentativas por chave (IP+email, ou só IP quando o
+# e-mail ainda não é conhecido). Simples de propósito: o backend roda como
+# processo único (sem múltiplas instâncias atrás de um load balancer), então
+# não há necessidade de um backend compartilhado (Redis) para isso.
+_LOGIN_ATTEMPTS: dict = defaultdict(deque)
+_LOGIN_WINDOW_SECONDS = 15 * 60
+_LOGIN_MAX_ATTEMPTS = 5
+
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+def _check_login_rate_limit(key: str) -> None:
+    now = time.time()
+    attempts = _LOGIN_ATTEMPTS[key]
+    while attempts and now - attempts[0] > _LOGIN_WINDOW_SECONDS:
+        attempts.popleft()
+    if len(attempts) >= _LOGIN_MAX_ATTEMPTS:
+        raise HTTPException(
+            status_code=429,
+            detail="Muitas tentativas de login. Tente novamente em alguns minutos.",
+        )
+    attempts.append(now)
+
+def _clear_login_rate_limit(key: str) -> None:
+    _LOGIN_ATTEMPTS.pop(key, None)
+
 def create_token(user_id: str) -> str:
     payload = {
         'sub': user_id,
@@ -638,26 +670,36 @@ def _open_finance_status_payload() -> OpenFinanceStatusOut:
         fallback_reason=fallback_reason,
     )
 
-def _of_crypto_key() -> bytes:
-    seed = OF_TOKEN_KEY or JWT_SECRET or "nocker-open-finance"
-    digest = hashlib.sha256(seed.encode()).digest()
-    return base64.urlsafe_b64encode(digest)
+def _of_crypto_keys() -> List[bytes]:
+    """Chaves Fernet derivadas de OF_TOKEN_KEY (atual, usada para
+    criptografar e como primeira tentativa de descriptografar) seguida das
+    chaves de OF_TOKEN_KEY_LEGACY (só para descriptografar dados antigos
+    durante uma rotação de chave — ver scripts/rotate_of_token_key.py)."""
+    seeds = [OF_TOKEN_KEY or JWT_SECRET or "nocker-open-finance"]
+    seeds += [s.strip() for s in OF_TOKEN_KEY_LEGACY.split(",") if s.strip()]
+    return [base64.urlsafe_b64encode(hashlib.sha256(seed.encode()).digest()) for seed in seeds]
 
 def _encrypt_secret(value: str) -> str:
     try:
         from cryptography.fernet import Fernet
-        return Fernet(_of_crypto_key()).encrypt(value.encode()).decode()
+        return Fernet(_of_crypto_keys()[0]).encrypt(value.encode()).decode()
     except Exception:
         return value
 
 def _decrypt_secret(value: Optional[str]) -> Optional[str]:
     if not value:
         return value
-    try:
-        from cryptography.fernet import Fernet
-        return Fernet(_of_crypto_key()).decrypt(value.encode()).decode()
-    except Exception:
-        return value
+    from cryptography.fernet import Fernet
+    for key in _of_crypto_keys():
+        try:
+            return Fernet(key).decrypt(value.encode()).decode()
+        except Exception:
+            continue
+    logging.warning(
+        "Não foi possível descriptografar um segredo do Open Finance com "
+        "nenhuma chave configurada (OF_TOKEN_KEY / OF_TOKEN_KEY_LEGACY)."
+    )
+    return None
 
 def _classify_category(description: str, amount: float, tx_type: Optional[str] = None) -> str:
     import re
@@ -1131,27 +1173,55 @@ async def register(payload: UserRegister):
     return AuthResponse(token=token, user=user_to_out(doc))
 
 @api_router.post("/auth/login", response_model=AuthResponse)
-async def login(payload: UserLogin):
+async def login(payload: UserLogin, request: Request):
+    rl_key = f"{_client_ip(request)}:{payload.email.lower()}"
+    _check_login_rate_limit(rl_key)
+
     response = supabase.table('users').select('*').eq('email', payload.email.lower()).execute()
     user = response.data[0] if response.data else None
     if not user or not verify_password(payload.password, user['password']):
         raise HTTPException(status_code=401, detail="Email ou senha inválidos")
+    _clear_login_rate_limit(rl_key)
     token = create_token(user['id'])
     return AuthResponse(token=token, user=user_to_out(user))
 
 @api_router.post("/auth/google", response_model=AuthResponse)
-async def google_login(payload: GoogleLogin):
-    # Busca usuário pelo google_id ou email
-    response = supabase.table('users').select('*').eq('email', payload.email.lower()).execute()
+async def google_login(payload: GoogleLogin, request: Request):
+    # O e-mail só é conhecido depois de validar o access_token (abaixo), então
+    # aqui o limite é por IP — evita usar o endpoint para martelar o servidor
+    # de auth do Supabase com tokens inválidos.
+    _check_login_rate_limit(f"{_client_ip(request)}:google")
+
+    # Nunca confiar em email/nome/id enviados pelo cliente: o access_token é
+    # validado diretamente contra o servidor de auth do Supabase, e é de lá
+    # que tiramos a identidade real do usuário. Isso evita que alguém forje
+    # uma requisição para assumir a conta de outra pessoa (account takeover).
+    try:
+        auth_response = supabase.auth.get_user(payload.access_token)
+    except Exception:
+        auth_response = None
+    google_user = auth_response.user if auth_response else None
+    if not google_user or not google_user.email:
+        raise HTTPException(status_code=401, detail="Token do Google inválido ou expirado")
+    if not google_user.email_confirmed_at:
+        raise HTTPException(status_code=401, detail="E-mail do Google não verificado")
+
+    email = google_user.email.lower()
+    google_id = google_user.id
+    metadata = google_user.user_metadata or {}
+    name = (metadata.get('full_name') or metadata.get('name') or email.split('@')[0]).strip()
+    avatar_url = metadata.get('avatar_url') or metadata.get('picture')
+
+    response = supabase.table('users').select('*').eq('email', email).execute()
     user = response.data[0] if response.data else None
 
     if user:
         # Usuário já existe — atualiza google_id e avatar se necessário
         update_data: dict = {}
         if not user.get('google_id'):
-            update_data['google_id'] = payload.google_id
-        if payload.avatar_url and not user.get('avatar_url'):
-            update_data['avatar_url'] = payload.avatar_url
+            update_data['google_id'] = google_id
+        if avatar_url and not user.get('avatar_url'):
+            update_data['avatar_url'] = avatar_url
         if update_data:
             update_data['updated_at'] = datetime.now(timezone.utc).isoformat()
             res = supabase.table('users').update(update_data).eq('id', user['id']).execute()
@@ -1161,11 +1231,11 @@ async def google_login(payload: GoogleLogin):
         user_id = str(uuid.uuid4())
         user = {
             "id": user_id,
-            "name": payload.name.strip(),
-            "email": payload.email.lower(),
-            "password": hash_password(payload.google_id),  # senha fictícia, não usada
-            "google_id": payload.google_id,
-            "avatar_url": payload.avatar_url,
+            "name": name,
+            "email": email,
+            "password": hash_password(secrets.token_hex(32)),  # senha aleatória, não usada
+            "google_id": google_id,
+            "avatar_url": avatar_url,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
         supabase.table('users').insert(user).execute()
